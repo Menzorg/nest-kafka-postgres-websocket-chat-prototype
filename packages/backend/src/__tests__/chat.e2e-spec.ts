@@ -24,6 +24,7 @@ describe('ChatController (e2e)', () => {
   const mockChat: Chat = {
     id: 'chat1',
     participants: ['user1', 'user2'],
+    messages: [],
     createdAt: new Date(),
     updatedAt: new Date(),
   };

@@ -2,11 +2,29 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# Копируем package.json из всех пакетов
 COPY package*.json ./
-COPY tsconfig.json ./
+COPY packages/common/package*.json ./packages/common/
+COPY packages/backend/package*.json ./packages/backend/
 
+# Копируем общие файлы монорепозитория
+COPY tsconfig*.json ./
+COPY packages/common/tsconfig*.json ./packages/common/
+COPY packages/backend/tsconfig*.json ./packages/backend/
+
+# Устанавливаем зависимости
 RUN npm install
 
-COPY . .
+# Копируем исходники
+COPY packages/common/src ./packages/common/src
+COPY packages/backend/src ./packages/backend/src
 
-CMD ["npm", "run", "start:dev"]
+# Создаем пользователя node
+RUN chown -R node:node /app
+USER node
+
+# Открываем порт
+EXPOSE 4000
+
+# Запускаем в dev режиме
+CMD ["npm", "run", "--prefix", "packages/backend", "start:dev"]

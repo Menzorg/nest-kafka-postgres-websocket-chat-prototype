@@ -4,6 +4,7 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { UseGuards } from '@nestjs/common';
@@ -19,30 +20,36 @@ import { ChatMessage, Message, MessageStatus, MessageDeliveryStatus } from '@web
     credentials: true,
   },
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer()
   server: Server;
 
   constructor(
     private readonly chatService: ChatService,
     private readonly kafkaAdapter: KafkaAdapter,
-  ) {
-    // Подписываемся на события Kafka при создании шлюза
-    this.subscribeToKafkaEvents();
+  ) {}
+
+  async afterInit() {
+    // Подписываемся на события Kafka после инициализации шлюза
+    await this.subscribeToKafkaEvents();
   }
 
   private async subscribeToKafkaEvents() {
-    // Подписываемся на сообщения
-    await this.kafkaAdapter.subscribe<Message>('chat.messages', async (message) => {
-      const room = `chat:${message.roomId}`;
-      this.server.to(room).emit('message', message);
-    });
+    try {
+      // Подписываемся на сообщения
+      await this.kafkaAdapter.subscribe<Message>('chat.messages', async (message) => {
+        const room = `chat:${message.roomId}`;
+        this.server.to(room).emit('message', message);
+      });
 
-    // Подписываемся на статусы сообщений
-    await this.kafkaAdapter.subscribe<MessageStatus>('chat.message.status', async (status) => {
-      const room = `user:${status.senderId}`;
-      this.server.to(room).emit('message:status', status);
-    });
+      // Подписываемся на статусы сообщений
+      await this.kafkaAdapter.subscribe<MessageStatus>('chat.message.status', async (status) => {
+        const room = `user:${status.senderId}`;
+        this.server.to(room).emit('message:status', status);
+      });
+    } catch (error) {
+      console.error('Failed to subscribe to Kafka events:', error);
+    }
   }
 
   async handleConnection(client: Socket) {
@@ -53,13 +60,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // Подключаем пользователя к его личной комнате
-    client.join(`user:${userId}`);
+    await client.join(`user:${userId}`);
 
     try {
       // Получаем чаты пользователя и подключаем его к комнатам чатов
       const chats = await this.chatService.getUserChats(userId);
       for (const chat of chats) {
-        client.join(`chat:${chat.id}`);
+        await client.join(`chat:${chat.id}`);
       }
 
       // Получаем и отправляем недоставленные сообщения
@@ -68,48 +75,62 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         client.emit('message', message);
       }
     } catch (error) {
-      console.error('Error in handleConnection:', error);
+      console.error('Failed to handle connection:', error);
       client.disconnect();
     }
   }
 
-  handleDisconnect(client: Socket) {
-    // Отключаем пользователя от всех комнат
+  async handleDisconnect(client: Socket) {
     const userId = client.data?.user?.id;
     if (userId) {
-      client.leave(`user:${userId}`);
+      await client.leave(`user:${userId}`);
     }
   }
 
   @SubscribeMessage('message')
-  async handleMessage(message: ChatMessage, client: Socket) {
+  async handleMessage(client: Socket, payload: ChatMessage) {
+    const userId = client.data?.user?.id;
+    if (!userId) {
+      return;
+    }
+
     try {
       // Проверяем существование чата
-      await this.chatService.getChat(message.chatId);
+      await this.chatService.getChat(payload.chatId);
 
       // Сохраняем сообщение
-      const savedMessage = await this.chatService.saveMessage(message);
+      const message = await this.chatService.saveMessage({
+        ...payload,
+        senderId: userId,
+      });
 
-      // Публикуем сообщение в Kafka
-      const kafkaMessage: Message = {
-        id: savedMessage.id,
-        roomId: savedMessage.chatId,
-        senderId: savedMessage.senderId,
-        content: savedMessage.content,
-        timestamp: savedMessage.createdAt,
+      // Отправляем сообщение в Kafka
+      await this.kafkaAdapter.publish('chat.messages', {
+        id: message.id,
+        roomId: message.chatId,
+        senderId: message.senderId,
+        content: message.content,
+        timestamp: message.createdAt,
         status: MessageDeliveryStatus.SENT,
-      };
-
-      await this.kafkaAdapter.publish<Message>('chat.messages', kafkaMessage);
+      });
 
       // Отправляем подтверждение отправителю
-      client.emit('message:ack', { messageId: savedMessage.id });
+      client.emit('message:ack', { messageId: message.id });
+
+      return {
+        status: 'ok',
+        data: message,
+      };
     } catch (error) {
-      console.error('Error in handleMessage:', error);
+      console.error('Failed to handle message:', error);
       client.emit('message:error', {
-        messageId: message.id,
-        error: error.message || 'Chat not found',
+        messageId: payload.id,
+        error: error.message,
       });
+      return {
+        status: 'error',
+        message: error.message,
+      };
     }
   }
 

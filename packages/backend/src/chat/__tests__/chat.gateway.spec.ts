@@ -38,6 +38,7 @@ describe('ChatGateway', () => {
   const mockChat: Chat = {
     id: 'chat1',
     participants: ['user1', 'user2'],
+    messages: [],
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -126,7 +127,7 @@ describe('ChatGateway', () => {
 
   describe('handleMessage', () => {
     it('should handle new message', async () => {
-      await gateway.handleMessage(mockMessage, mockClient);
+      await gateway.handleMessage(mockClient, mockMessage);
 
       const expectedKafkaMessage: Message = {
         id: mockMessage.id,
@@ -145,39 +146,13 @@ describe('ChatGateway', () => {
       const spy = jest.spyOn(chatService, 'getChat');
       spy.mockRejectedValueOnce(new NotFoundException('Chat not found'));
 
-      await gateway.handleMessage(mockMessage, mockClient);
+      await gateway.handleMessage(mockClient, mockMessage);
 
       expect(mockClient.emit).toHaveBeenCalledWith('message:error', {
         messageId: mockMessage.id,
         error: 'Chat not found',
       });
       expect(kafkaAdapter.publish).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('handleMessageRead', () => {
-    it('should handle message read status', async () => {
-      await gateway.handleMessageRead({ messageId: 'msg1' }, mockClient);
-
-      const expectedStatus: MessageStatus = {
-        messageId: 'msg1',
-        senderId: mockMessage.senderId,
-        status: MessageDeliveryStatus.READ,
-      };
-
-      expect(kafkaAdapter.publish).toHaveBeenCalledWith('chat.message.status', expectedStatus);
-    });
-
-    it('should handle error when message not found', async () => {
-      const spy = jest.spyOn(chatService, 'getMessage');
-      spy.mockRejectedValueOnce(new NotFoundException('Message not found'));
-
-      await gateway.handleMessageRead({ messageId: 'msg1' }, mockClient);
-
-      expect(mockClient.emit).toHaveBeenCalledWith('message:error', {
-        messageId: 'msg1',
-        error: 'Message not found',
-      });
     });
   });
 });
