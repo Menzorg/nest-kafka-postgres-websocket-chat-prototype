@@ -223,6 +223,91 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     }
   }
 
+  @SubscribeMessage('chat:join')
+  async handleChatJoin(client: Socket, payload: { chatId: string }) {
+    try {
+      this.logger.log('=== Handling chat:join ===');
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const chat = await this.chatService.getChat(payload.chatId);
+
+      if (!chat) {
+        this.logger.error(`Chat ${payload.chatId} not found`);
+        return { status: 'error', message: 'Chat not found' };
+      }
+
+      if (!chat.participants.includes(userId)) {
+        this.logger.error(`User ${userId} is not a participant of chat ${payload.chatId}`);
+        return { status: 'error', message: 'User is not a participant of this chat' };
+      }
+
+      // Присоединяем клиента к комнате чата
+      await client.join(`chat:${payload.chatId}`);
+      this.logger.log(`User ${userId} joined chat ${payload.chatId}`);
+
+      // Получаем непрочитанные сообщения
+      const undeliveredMessages = await this.chatService.getUndeliveredMessages(userId, payload.chatId);
+      
+      // Обновляем статус сообщений на DELIVERED
+      for (const message of undeliveredMessages) {
+        await this.chatService.updateMessageStatus(message.id, MessageDeliveryStatus.DELIVERED);
+        
+        // Уведомляем отправителя об обновлении статуса
+        this.io.to(`user:${message.senderId}`).emit('message:status', {
+          messageId: message.id,
+          status: MessageDeliveryStatus.DELIVERED,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      this.logger.log(`Updated status for ${undeliveredMessages.length} messages`);
+      return { status: 'ok' };
+    } catch (error) {
+      this.logger.error('Error in handleChatJoin:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('message:read')
+  async handleMessageRead(client: Socket, payload: { messageId: string }) {
+    try {
+      this.logger.log('=== Handling message:read ===');
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const message = await this.chatService.getMessage(payload.messageId);
+
+      if (!message) {
+        this.logger.error(`Message ${payload.messageId} not found`);
+        return { status: 'error', message: 'Message not found' };
+      }
+
+      // Проверяем, что пользователь является участником чата
+      const chat = await this.chatService.getChat(message.chatId);
+      if (!chat.participants.includes(userId)) {
+        this.logger.error(`User ${userId} is not a participant of chat ${message.chatId}`);
+        return { status: 'error', message: 'User is not a participant of this chat' };
+      }
+
+      // Обновляем статус сообщения
+      await this.chatService.updateMessageStatus(payload.messageId, MessageDeliveryStatus.READ);
+      
+      // Уведомляем отправителя об обновлении статуса
+      this.io.to(`user:${message.senderId}`).emit('message:status', {
+        messageId: payload.messageId,
+        status: MessageDeliveryStatus.READ,
+        timestamp: new Date().toISOString()
+      });
+
+      this.logger.log(`Message ${payload.messageId} marked as read by user ${userId}`);
+      return { status: 'ok' };
+    } catch (error) {
+      this.logger.error('Error in handleMessageRead:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
   private cleanupDeadConnections() {
     try {
       this.logger.log('=== Running periodic connection cleanup ===');

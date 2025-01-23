@@ -43,14 +43,4 @@ export class ChatController {
   async getChatMessages(@Param('chatId') chatId: string): Promise<ChatMessage[]> {
     return this.chatService.getChatMessages(chatId);
   }
-
-  @Post(':chatId/messages/:messageId/read')
-  @ApiOperation({ summary: 'Mark message as read' })
-  @ApiResponse({ status: 200, description: 'Message marked as read' })
-  async markMessageAsRead(
-    @Param('messageId') messageId: string,
-    @Request() req: any,
-  ): Promise<void> {
-    return this.chatService.markMessageAsRead(messageId, req.user.id);
-  }
 }

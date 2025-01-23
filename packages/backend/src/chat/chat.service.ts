@@ -202,7 +202,9 @@ export class ChatService {
     }));
   }
 
-  async markMessageAsRead(messageId: string, userId: string): Promise<void> {
+  async updateMessageStatus(messageId: string, status: MessageDeliveryStatus): Promise<void> {
+    console.log('=== Updating Message Status in DB ===', { messageId, status });
+    
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
       relations: ['chat', 'chat.participants'],
@@ -217,23 +219,43 @@ export class ChatService {
       relations: ['participants'],
     });
 
-    if (!chat || !chat.participants.some(p => p.id === userId)) {
-      throw new Error('User is not a participant of this chat');
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
     }
 
-    message.status = MessageDeliveryStatus.READ;
+    message.status = status;
     await this.messageRepository.save(message);
+    
+    console.log('=== Message Status Updated in DB ===', {
+      messageId,
+      oldStatus: message.status,
+      newStatus: status
+    });
   }
 
-  async getUndeliveredMessages(userId: string): Promise<ChatMessage[]> {
-    const messages = await this.messageRepository
+  async getUndeliveredMessages(userId: string, chatId?: string): Promise<ChatMessage[]> {
+    console.log('=== Getting Undelivered Messages ===', { userId, chatId });
+    
+    const queryBuilder = this.messageRepository
       .createQueryBuilder('message')
       .leftJoinAndSelect('message.chat', 'chat')
       .leftJoinAndSelect('chat.participants', 'participant')
       .where('participant.id = :userId', { userId })
       .andWhere('message.status = :status', { status: MessageDeliveryStatus.SENT })
-      .andWhere('message.senderId != :userId', { userId })
-      .getMany();
+      .andWhere('message.senderId != :userId', { userId });
+
+    if (chatId) {
+      queryBuilder.andWhere('message.chatId = :chatId', { chatId });
+    }
+
+    const messages = await queryBuilder.getMany();
+
+    console.log('=== Found Undelivered Messages ===', messages.map(m => ({
+      id: m.id,
+      chatId: m.chatId,
+      senderId: m.senderId,
+      status: m.status
+    })));
 
     return messages.map(message => ({
       id: message.id,

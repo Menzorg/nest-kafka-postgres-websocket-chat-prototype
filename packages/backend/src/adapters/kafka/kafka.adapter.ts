@@ -1,5 +1,5 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { Kafka, Producer, Consumer, ConsumerSubscribeTopic } from 'kafkajs';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import { Kafka, Producer, Consumer, ConsumerSubscribeTopic, RetryOptions } from 'kafkajs';
 
 export interface KafkaConfig {
   clientId?: string;
@@ -13,10 +13,19 @@ export class KafkaAdapter implements OnModuleInit, OnModuleDestroy {
   private consumer: Consumer;
   private readonly kafka: Kafka;
   private isConsumerRunning = false;
+  private readonly logger = new Logger(KafkaAdapter.name);
   private pendingSubscriptions: Array<{
     topic: string;
     handler: (message: any) => Promise<void>;
   }> = [];
+
+  private readonly retryOptions: RetryOptions = {
+    maxRetryTime: 30000,
+    initialRetryTime: 100,
+    factor: 2,
+    multiplier: 1.5,
+    retries: 5
+  };
 
   constructor(config?: KafkaConfig) {
     this.kafka = new Kafka({
@@ -24,63 +33,135 @@ export class KafkaAdapter implements OnModuleInit, OnModuleDestroy {
       brokers: config?.brokers || [process.env.KAFKA_BROKER || 'localhost:29092'],
     });
 
-    this.producer = this.kafka.producer();
+    this.producer = this.kafka.producer({
+      retry: this.retryOptions,
+      allowAutoTopicCreation: true
+    });
+
     this.consumer = this.kafka.consumer({ 
-      groupId: config?.groupId || 'webchat-group' 
+      groupId: config?.groupId || 'webchat-group',
+      retry: this.retryOptions,
+      readUncommitted: false
     });
   }
 
   async onModuleInit() {
-    await this.producer.connect();
-    await this.consumer.connect();
+    try {
+      await this.producer.connect();
+      await this.consumer.connect();
+      this.logger.log('Successfully connected to Kafka');
+    } catch (error) {
+      this.logger.error('Failed to connect to Kafka', error);
+      throw error;
+    }
   }
 
   async onModuleDestroy() {
-    await this.producer.disconnect();
-    await this.consumer.disconnect();
+    try {
+      await this.producer.disconnect();
+      await this.consumer.disconnect();
+      this.logger.log('Successfully disconnected from Kafka');
+    } catch (error) {
+      this.logger.error('Error disconnecting from Kafka', error);
+    }
   }
 
   async publish<T>(topic: string, message: T): Promise<void> {
-    await this.producer.send({
-      topic,
-      messages: [
-        {
-          key: (message as any).id || (message as any).messageId,
-          value: JSON.stringify(message),
-        },
-      ],
-    });
+    try {
+      await this.producer.send({
+        topic,
+        messages: [
+          {
+            key: (message as any).id || (message as any).messageId,
+            value: JSON.stringify(message),
+          },
+        ],
+      });
+      this.logger.debug(`Message published to topic ${topic}`, message);
+    } catch (error) {
+      this.logger.error(`Failed to publish message to topic ${topic}`, error);
+      throw error;
+    }
   }
 
   async subscribe<T>(topic: string, handler: (message: T) => Promise<void>): Promise<void> {
-    // Добавляем подписку в очередь
-    this.pendingSubscriptions.push({ topic, handler });
+    try {
+      // Добавляем подписку в очередь
+      this.pendingSubscriptions.push({ topic, handler });
+      this.logger.log(`Subscribing to topic ${topic}`);
 
-    // Если consumer уже запущен, ничего не делаем
-    if (this.isConsumerRunning) {
-      console.log(`Consumer already running, subscription to ${topic} queued`);
-      return;
-    }
+      // Если consumer уже запущен, ничего не делаем
+      if (this.isConsumerRunning) {
+        this.logger.debug(`Consumer already running, subscription to ${topic} queued`);
+        return;
+      }
 
-    // Подписываемся на топик
-    await this.consumer.subscribe({ topic, fromBeginning: true });
+      // Подписываемся на топик
+      await this.consumer.subscribe({ topic, fromBeginning: true });
 
-    // Запускаем consumer только один раз
-    if (!this.isConsumerRunning) {
-      this.isConsumerRunning = true;
-      await this.consumer.run({
-        eachMessage: async ({ topic, message }) => {
-          const value = message.value?.toString();
-          if (value) {
-            const parsedMessage = JSON.parse(value);
-            // Находим соответствующий handler для топика
-            const subscription = this.pendingSubscriptions.find(sub => sub.topic === topic);
-            if (subscription) {
-              await subscription.handler(parsedMessage);
+      // Запускаем consumer только один раз
+      if (!this.isConsumerRunning) {
+        this.isConsumerRunning = true;
+        await this.consumer.run({
+          autoCommit: true,
+          autoCommitInterval: 5000,
+          autoCommitThreshold: 100,
+          eachMessage: async ({ topic, partition, message }) => {
+            try {
+              const value = message.value?.toString();
+              if (value) {
+                const parsedMessage = JSON.parse(value);
+                // Находим соответствующий handler для топика
+                const subscription = this.pendingSubscriptions.find(sub => sub.topic === topic);
+                if (subscription) {
+                  this.logger.debug(`Processing message from topic ${topic}`, {
+                    key: message.key?.toString(),
+                    partition,
+                    offset: message.offset,
+                  });
+                  await subscription.handler(parsedMessage);
+                }
+              }
+            } catch (error) {
+              this.logger.error(`Error processing message from topic ${topic}`, error);
+              // Не выбрасываем ошибку, чтобы не остановить обработку сообщений
             }
+          },
+        });
+
+        // Обработка ошибок consumer'а
+        this.consumer.on('consumer.crash', async (error) => {
+          this.logger.error('Consumer crashed', error);
+          this.isConsumerRunning = false;
+          // Пытаемся переподключиться
+          try {
+            await this.consumer.connect();
+            await this.subscribe(topic, handler);
+          } catch (reconnectError) {
+            this.logger.error('Failed to reconnect consumer', reconnectError);
           }
-        },
-      });
+        });
+
+        this.consumer.on('consumer.disconnect', () => {
+          this.logger.warn('Consumer disconnected');
+          this.isConsumerRunning = false;
+        });
+
+        this.consumer.on('consumer.connect', () => {
+          this.logger.log('Consumer connected');
+        });
+
+        this.consumer.on('consumer.rebalancing', () => {
+          this.logger.log('Consumer rebalancing');
+        });
+
+        this.consumer.on('consumer.heartbeat', () => {
+          this.logger.debug('Consumer heartbeat');
+        });
+      }
+    } catch (error) {
+      this.logger.error(`Failed to subscribe to topic ${topic}`, error);
+      throw error;
     }
   }
 }
