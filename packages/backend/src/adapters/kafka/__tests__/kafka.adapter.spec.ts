@@ -1,14 +1,13 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { KafkaAdapter, KafkaConfig } from '../kafka.adapter';
-import { Kafka } from 'kafkajs';
+import { KafkaAdapter } from '../kafka.adapter';
+import { Kafka, Producer, Consumer, ConsumerRunConfig } from 'kafkajs';
 import { Message, MessageDeliveryStatus } from '@webchat/common';
 
 jest.mock('kafkajs');
 
 describe('KafkaAdapter', () => {
   let adapter: KafkaAdapter;
-  let mockProducer: any;
-  let mockConsumer: any;
+  let mockProducer: jest.Mocked<Producer>;
+  let mockConsumer: jest.Mocked<Consumer>;
 
   const mockTimestamp = new Date('2025-01-23T04:41:30.749Z');
   const mockMessage: Message = {
@@ -20,55 +19,56 @@ describe('KafkaAdapter', () => {
     status: MessageDeliveryStatus.SENT,
   };
 
-  // После JSON.stringify/parse дата становится строкой
-  const mockSerializedMessage = {
-    ...mockMessage,
-    timestamp: mockTimestamp.toISOString(),
-  };
-
-  const mockConfig: KafkaConfig = {
-    clientId: 'test-client',
-    brokers: ['localhost:9092'],
-    groupId: 'test-group',
-  };
-
-  beforeEach(async () => {
+  beforeEach(() => {
     mockProducer = {
       connect: jest.fn(),
       disconnect: jest.fn(),
       send: jest.fn(),
-    };
+      sendBatch: jest.fn(),
+      isIdempotent: jest.fn(),
+      events: {},
+      on: jest.fn(),
+      transaction: jest.fn(),
+      logger: jest.fn() as any,
+    } as unknown as jest.Mocked<Producer>;
 
     mockConsumer = {
       connect: jest.fn(),
       disconnect: jest.fn(),
       subscribe: jest.fn(),
-      run: jest.fn(),
-    };
+      run: jest.fn().mockImplementation((config: ConsumerRunConfig) => {
+        if (config.eachMessage) {
+          // Сохраняем callback для последующего вызова в тестах
+          (mockConsumer as any).eachMessageCallback = config.eachMessage;
+        }
+        return Promise.resolve();
+      }),
+      stop: jest.fn(),
+      seek: jest.fn(),
+      describeGroup: jest.fn(),
+      pause: jest.fn(),
+      resume: jest.fn(),
+      commitOffsets: jest.fn(),
+      resolveOffset: jest.fn(),
+      on: jest.fn(),
+      events: {},
+      logger: jest.fn() as any,
+    } as unknown as jest.Mocked<Consumer>;
 
     (Kafka as jest.Mock).mockImplementation(() => ({
       producer: () => mockProducer,
       consumer: () => mockConsumer,
     }));
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        {
-          provide: KafkaAdapter,
-          useValue: new KafkaAdapter(mockConfig),
-        },
-      ],
-    }).compile();
-
-    adapter = module.get<KafkaAdapter>(KafkaAdapter);
+    adapter = new KafkaAdapter({
+      brokers: ['localhost:9092'],
+      clientId: 'test-client',
+      groupId: 'test-group',
+    });
   });
 
   afterEach(() => {
     jest.clearAllMocks();
-  });
-
-  it('should be defined', () => {
-    expect(adapter).toBeDefined();
   });
 
   describe('onModuleInit', () => {
@@ -88,7 +88,7 @@ describe('KafkaAdapter', () => {
   });
 
   describe('publish', () => {
-    it('should send message to kafka', async () => {
+    it('should publish message to kafka', async () => {
       await adapter.publish('test-topic', mockMessage);
       expect(mockProducer.send).toHaveBeenCalledWith({
         topic: 'test-topic',
@@ -100,6 +100,12 @@ describe('KafkaAdapter', () => {
         ],
       });
     });
+
+    it('should handle publish error', async () => {
+      const error = new Error('Publish failed');
+      mockProducer.send.mockRejectedValue(error);
+      await expect(adapter.publish('test-topic', mockMessage)).rejects.toThrow(error);
+    });
   });
 
   describe('subscribe', () => {
@@ -109,17 +115,43 @@ describe('KafkaAdapter', () => {
 
       expect(mockConsumer.subscribe).toHaveBeenCalledWith({
         topic: 'test-topic',
+        fromBeginning: true,
       });
 
-      const runCallback = mockConsumer.run.mock.calls[0][0];
-      expect(runCallback).toBeDefined();
+      // Получаем сохраненный callback и вызываем его
+      const mockEachMessage = {
+        topic: 'test-topic',
+        partition: 0,
+        message: {
+          value: Buffer.from(JSON.stringify(mockMessage)),
+        },
+      };
 
-      // Имитируем получение сообщения
-      await runCallback.eachMessage({
-        message: { value: JSON.stringify(mockSerializedMessage) },
+      await (mockConsumer as any).eachMessageCallback(mockEachMessage);
+      expect(mockHandler).toHaveBeenCalledWith({
+        ...mockMessage,
+        timestamp: mockMessage.timestamp.toISOString(),
       });
+    });
 
-      expect(mockHandler).toHaveBeenCalledWith(mockSerializedMessage);
+    it('should handle subscribe error', async () => {
+      const error = new Error('Subscribe failed');
+      mockConsumer.subscribe.mockRejectedValue(error);
+      await expect(adapter.subscribe('test-topic', jest.fn())).rejects.toThrow(error);
+    });
+
+    it('should handle message parsing error', async () => {
+      const mockHandler = jest.fn();
+      await adapter.subscribe('test-topic', mockHandler);
+
+      const mockEachMessage = {
+        message: {
+          value: Buffer.from('invalid json'),
+        },
+      };
+
+      await (mockConsumer as any).eachMessageCallback(mockEachMessage);
+      expect(mockHandler).not.toHaveBeenCalled();
     });
   });
 });

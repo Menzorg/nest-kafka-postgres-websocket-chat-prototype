@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
-import { Kafka, Producer, Consumer, ConsumerSubscribeTopic, RetryOptions } from 'kafkajs';
+import { Kafka, Producer, Consumer, RetryOptions } from 'kafkajs';
 
 export interface KafkaConfig {
   clientId?: string;
@@ -9,6 +9,7 @@ export interface KafkaConfig {
 
 @Injectable()
 export class KafkaAdapter implements OnModuleInit, OnModuleDestroy {
+  private isShuttingDown = false;
   private producer: Producer;
   private consumer: Consumer;
   private readonly kafka: Kafka;
@@ -57,16 +58,33 @@ export class KafkaAdapter implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    this.isShuttingDown = true;
     try {
-      await this.producer.disconnect();
-      await this.consumer.disconnect();
+      // Перестаем принимать новые сообщения
+      if (this.isConsumerRunning) {
+        await this.consumer.pause([{ topic: '*' }]);
+        this.logger.log('Consumer paused');
+      }
+
+      // Ждем завершения текущих операций
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // Отключаем producer и consumer
+      await Promise.all([
+        this.producer.disconnect(),
+        this.consumer.disconnect()
+      ]);
+
       this.logger.log('Successfully disconnected from Kafka');
     } catch (error) {
-      this.logger.error('Error disconnecting from Kafka', error);
+      this.logger.error('Error during graceful shutdown', error);
     }
   }
 
   async publish<T>(topic: string, message: T): Promise<void> {
+    if (this.isShuttingDown) {
+      throw new Error('Service is shutting down');
+    }
     try {
       await this.producer.send({
         topic,
@@ -85,6 +103,9 @@ export class KafkaAdapter implements OnModuleInit, OnModuleDestroy {
   }
 
   async subscribe<T>(topic: string, handler: (message: T) => Promise<void>): Promise<void> {
+    if (this.isShuttingDown) {
+      throw new Error('Service is shutting down');
+    }
     try {
       // Добавляем подписку в очередь
       this.pendingSubscriptions.push({ topic, handler });

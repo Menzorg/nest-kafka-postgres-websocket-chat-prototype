@@ -16,7 +16,7 @@ describe('AuthService', () => {
   const mockUser = {
     id: '1',
     email: 'test@test.com',
-    username: 'testuser',
+    name: 'testuser',
     password: 'hashedPassword',
   };
 
@@ -30,6 +30,7 @@ describe('AuthService', () => {
             create: jest.fn(),
             findByEmail: jest.fn(),
             findById: jest.fn(),
+            findAll: jest.fn(),
           },
         },
         {
@@ -69,7 +70,7 @@ describe('AuthService', () => {
         user: {
           id: mockUser.id,
           email: mockUser.email,
-          username: mockUser.username,
+          username: mockUser.name,
         },
       });
     });
@@ -94,7 +95,7 @@ describe('AuthService', () => {
         user: {
           id: mockUser.id,
           email: mockUser.email,
-          username: mockUser.username,
+          username: mockUser.name,
         },
       });
     });
@@ -128,7 +129,7 @@ describe('AuthService', () => {
       const payload = {
         sub: '1',
         email: 'test@test.com',
-        username: 'testuser',
+        name: 'testuser',
       };
 
       (userService.findById as jest.Mock).mockResolvedValue(mockUser);
@@ -137,6 +138,68 @@ describe('AuthService', () => {
 
       expect(userService.findById).toHaveBeenCalledWith(payload.sub);
       expect(result).toEqual(mockUser);
+    });
+
+    it('should throw UnauthorizedException if payload has no sub', async () => {
+      const payload = {
+        email: 'test@test.com',
+        name: 'testuser',
+      };
+
+      await expect(service.validateUser(payload)).rejects.toThrow(UnauthorizedException);
+      expect(userService.findById).not.toHaveBeenCalled();
+    });
+
+    it('should throw UnauthorizedException if user not found', async () => {
+      const payload = {
+        sub: '1',
+        email: 'test@test.com',
+        name: 'testuser',
+      };
+
+      (userService.findById as jest.Mock).mockResolvedValue(null);
+
+      await expect(service.validateUser(payload)).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should handle database errors', async () => {
+      const payload = {
+        sub: '1',
+        email: 'test@test.com',
+        name: 'testuser',
+      };
+
+      const error = new Error('Database error');
+      (userService.findById as jest.Mock).mockRejectedValue(error);
+
+      await expect(service.validateUser(payload)).rejects.toThrow(error);
+    });
+  });
+
+  describe('getAllUsers', () => {
+    it('should return all users', async () => {
+      const mockUsers = [
+        { id: '1', email: 'user1@test.com', name: 'user1', password: 'hash1' },
+        { id: '2', email: 'user2@test.com', name: 'user2', password: 'hash2' },
+      ];
+
+      (userService.findAll as jest.Mock).mockResolvedValue(mockUsers);
+
+      const result = await service.getAllUsers();
+
+      expect(userService.findAll).toHaveBeenCalled();
+      expect(result).toEqual(mockUsers.map(user => ({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      })));
+    });
+
+    it('should handle errors', async () => {
+      const error = new Error('Database error');
+      (userService.findAll as jest.Mock).mockRejectedValue(error);
+
+      await expect(service.getAllUsers()).rejects.toThrow(error);
     });
   });
 });

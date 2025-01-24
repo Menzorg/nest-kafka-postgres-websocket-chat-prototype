@@ -12,10 +12,13 @@ import { UserModule } from '../user/user.module';
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        secret: configService.get('JWT_SECRET', 'your-secret-key'),
-        signOptions: { expiresIn: '1d' },
-      }),
+      useFactory: async (configService: ConfigService) => {
+        const config = JwtStrategy.getConfig(configService);
+        return {
+          secret: config.secret,
+          signOptions: { expiresIn: config.expiresIn },
+        };
+      },
       inject: [ConfigService],
     }),
     UserModule,

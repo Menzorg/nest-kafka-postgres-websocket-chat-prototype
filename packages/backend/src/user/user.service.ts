@@ -131,4 +131,21 @@ export class UserService {
       throw error;
     }
   }
+
+  async remove(id: string) {
+    this.logger.log('=== Removing user ===');
+    this.logger.log('User ID:', id);
+    
+    try {
+      const user = await this.findById(id);
+      await this.userRepository.remove(user);
+      this.userStatuses.delete(id);
+      this.logger.log('User removed successfully');
+    } catch (error) {
+      this.logger.error('Error removing user');
+      this.logger.error('Error:', error.message);
+      this.logger.error('Stack:', error.stack);
+      throw error;
+    }
+  }
 }

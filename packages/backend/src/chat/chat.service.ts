@@ -6,6 +6,7 @@ import { Message as MessageEntity } from './entities/message.entity';
 import { Chat, ChatMessage, MessageDeliveryStatus } from '@webchat/common';
 import { User } from '../user/entities/user.entity';
 import { v4 as uuidv4 } from 'uuid';
+import { In } from 'typeorm';
 
 @Injectable()
 export class ChatService {
@@ -19,36 +20,41 @@ export class ChatService {
   ) {}
 
   async createChat(userId1: string, userId2: string): Promise<Chat> {
-    // Проверяем, нет ли уже чата между этими пользователями
-    const existingChat = await this.findChatByParticipants(userId1, userId2);
-    if (existingChat) {
-      throw new ConflictException('Chat already exists between these users');
+    // Проверяем существование пользователей
+    const user1 = await this.userRepository.findOneBy({ id: userId1 });
+    if (!user1) {
+      throw new NotFoundException(`User with ID ${userId1} not found`);
     }
 
-    // Получаем пользователей
-    const [user1, user2] = await Promise.all([
-      this.userRepository.findOneBy({ id: userId1 }),
-      this.userRepository.findOneBy({ id: userId2 }),
-    ]);
+    const user2 = await this.userRepository.findOneBy({ id: userId2 });
+    if (!user2) {
+      throw new NotFoundException(`User with ID ${userId2} not found`);
+    }
 
-    if (!user1 || !user2) {
-      throw new NotFoundException('One or both users not found');
+    // Проверяем, существует ли уже чат между этими пользователями
+    const existingChat = await this.chatRepository
+      .createQueryBuilder('chat')
+      .innerJoinAndSelect('chat.participants', 'participant')
+      .where('participant.id IN (:...userIds)', { userIds: [userId1, userId2] })
+      .getOne();
+
+    if (existingChat) {
+      throw new ConflictException('Chat between these users already exists');
     }
 
     // Создаем новый чат
     const chat = this.chatRepository.create({
-      id: uuidv4(),
-      participants: [user1, user2],
+      participants: [user1, user2]
     });
 
-    await this.chatRepository.save(chat);
+    const savedChat = await this.chatRepository.save(chat);
 
     return {
-      id: chat.id,
-      participants: [userId1, userId2],
+      id: savedChat.id,
+      participants: savedChat.participants.map(p => p.id),
       messages: [],
-      createdAt: chat.createdAt,
-      updatedAt: chat.updatedAt,
+      createdAt: savedChat.createdAt,
+      updatedAt: savedChat.updatedAt
     };
   }
 
@@ -79,12 +85,15 @@ export class ChatService {
   }
 
   async getUserChats(userId: string): Promise<Chat[]> {
-    const chats = await this.chatRepository
-      .createQueryBuilder('chat')
-      .leftJoinAndSelect('chat.participants', 'participant')
-      .leftJoinAndSelect('chat.messages', 'message')
-      .where('participant.id = :userId', { userId })
-      .getMany();
+    const user = await this.userRepository.findOneBy({ id: userId });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const chats = await this.chatRepository.find({
+      where: { participants: { id: userId } },
+      relations: ['participants', 'messages'],
+    });
 
     return chats.map(chat => ({
       id: chat.id,
@@ -143,28 +152,36 @@ export class ChatService {
     };
   }
 
-  async saveMessage(message: ChatMessage): Promise<ChatMessage> {
-    const chat = await this.chatRepository.findOneBy({ id: message.chatId });
+  async saveMessage(messageDto: ChatMessage): Promise<ChatMessage> {
+    const chat = await this.chatRepository.findOneBy({ id: messageDto.chatId });
     if (!chat) {
       throw new NotFoundException('Chat not found');
     }
 
-    const sender = await this.userRepository.findOneBy({ id: message.senderId });
+    const sender = await this.userRepository.findOneBy({ id: messageDto.senderId });
     if (!sender) {
       throw new NotFoundException('Sender not found');
     }
 
-    const newMessage = this.messageRepository.create({
-      id: message.id,
-      content: message.content,
-      chatId: chat.id,
-      senderId: sender.id,
-      status: message.status,
-      createdAt: message.createdAt,
+    const message = this.messageRepository.create({
+      id: uuidv4(),
+      chatId: messageDto.chatId,
+      senderId: messageDto.senderId,
+      content: messageDto.content,
+      status: MessageDeliveryStatus.SENT,
+      createdAt: new Date(),
     });
 
-    await this.messageRepository.save(newMessage);
-    return message;
+    const savedMessage = await this.messageRepository.save(message);
+
+    return {
+      id: savedMessage.id,
+      chatId: savedMessage.chatId,
+      senderId: savedMessage.senderId,
+      content: savedMessage.content,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+    };
   }
 
   async getMessage(messageId: string): Promise<ChatMessage | undefined> {
@@ -222,15 +239,20 @@ export class ChatService {
     if (!chat) {
       throw new NotFoundException('Chat not found');
     }
-
-    message.status = status;
-    await this.messageRepository.save(message);
     
-    console.log('=== Message Status Updated in DB ===', {
+    console.log('=== Message Status Updating in DB ===', {
       messageId,
       oldStatus: message.status,
       newStatus: status
     });
+
+    message.status = status;
+    await this.messageRepository.save(message);
+
+    console.log('=== Message Status Updated in DB ===', {
+      messageId,
+    });
+
   }
 
   async getUndeliveredMessages(userId: string, chatId?: string): Promise<ChatMessage[]> {

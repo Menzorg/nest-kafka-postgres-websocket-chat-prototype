@@ -31,12 +31,63 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   private readonly io: Server;
   private connectedClients: Map<string, ConnectedClient> = new Map();
   private readonly logger = new Logger(SocketGateway.name);
+  private cleanupInterval?: NodeJS.Timeout;
 
   constructor(
     private jwtService: JwtService,
     private authService: AuthService,
     private chatService: ChatService,
   ) {}
+
+  public async closeServer() {
+    try {
+      // Очищаем интервал очистки мертвых соединений
+      if (this.cleanupInterval) {
+        clearInterval(this.cleanupInterval);
+        this.cleanupInterval = undefined;
+      }
+
+      if (this.io) {
+        this.logger.log('Closing Socket.IO server...');
+        
+        // Отключаем все соединения
+        const sockets = await this.io.fetchSockets();
+        this.logger.log(`Disconnecting ${sockets.length} sockets...`);
+        
+        await Promise.all(
+          Array.from(sockets).map((socket) => {
+            return new Promise<void>((resolve) => {
+              socket.disconnect(true);
+              resolve();
+            });
+          })
+        );
+
+        // Удаляем все слушатели
+        this.logger.log('Removing all listeners...');
+        this.io.removeAllListeners();
+        
+        // Закрываем сервер
+        this.logger.log('Closing server...');
+        await new Promise<void>((resolve) => {
+          this.io.close(() => resolve());
+        });
+        
+        // Очищаем список клиентов
+        this.logger.log('Clearing connected clients...');
+        this.connectedClients.clear();
+        
+        this.logger.log('Socket.IO server closed successfully');
+      }
+    } catch (error) {
+      this.logger.error('Error closing Socket.IO server:', error);
+      throw error;
+    }
+  }
+
+  public getActiveConnections(): number {
+    return this.io?.sockets?.sockets?.size || 0;
+  }
 
   afterInit(server: Server) {
     this.logger.log('=== WebSocket Gateway initialized ===');
@@ -46,11 +97,13 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       try {
         this.logger.log('=== Token verification middleware ===');
         this.logger.log(`Client ID: ${socket.id}`);
+        this.logger.log('Auth data:', socket.handshake?.auth);
         
         const rawToken = socket.handshake?.auth?.token;
         if (!rawToken) {
-          this.logger.error('No token provided');
-          return next(new Error('No token provided'));
+          const error = new Error('No token provided');
+          this.logger.error(error.message);
+          return next(error);
         }
 
         this.logger.log(`Raw token: ${rawToken}`);
@@ -64,17 +117,28 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
           const payload = await this.jwtService.verifyAsync(token);
           this.logger.log('Token verified successfully');
           
-          const user = await this.authService.validateUser(payload);
-          if (!user) {
-            this.logger.error('User not found');
-            return next(new Error('User not found'));
+          try {
+            const user = await this.authService.validateUser(payload);
+            this.logger.log('User validated successfully');
+            
+            // Сохраняем информацию о пользователе в socket
+            socket.data.user = user;
+            
+            // Добавляем обработчик отключения для каждого сокета
+            socket.on('disconnect', (reason) => {
+              this.logger.log(`Socket ${socket.id} disconnected:`, reason);
+              this.handleDisconnect(socket);
+            });
+            
+            next();
+          } catch (error) {
+            this.logger.error('=== User validation error ===');
+            this.logger.error('Error:', error.message);
+            this.logger.error('Stack:', error.stack);
+            next(new Error(error.message));
           }
-
-          // Сохраняем информацию о пользователе в socket
-          socket.data.user = user;
-          next();
         } catch (error) {
-          this.logger.error('=== Middleware error ===');
+          this.logger.error('=== Token verification error ===');
           this.logger.error('Error:', error.message);
           this.logger.error('Stack:', error.stack);
           next(error);
@@ -92,13 +156,8 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       this.logger.error('Error:', err);
     });
 
-    server.on('disconnect', (reason) => {
-      this.logger.log('=== Server disconnect event ===');
-      this.logger.log('Reason:', reason);
-    });
-
     // Запускаем периодическую очистку мертвых соединений
-    setInterval(() => this.cleanupDeadConnections(), 60000);
+    this.cleanupInterval = setInterval(() => this.cleanupDeadConnections(), 60000);
   }
 
   async handleConnection(client: Socket) {
@@ -142,6 +201,10 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         
         // Удаляем клиента из списка
         this.connectedClients.delete(client.id);
+        
+        // Важно: закрываем соединение полностью
+        client.removeAllListeners();
+        client.disconnect(true);
       }
       
       this.logger.log(`Client disconnected: ${client.id}`);
@@ -345,6 +408,30 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     } catch (error) {
       this.logger.error('=== Cleanup error ===');
       this.logger.error('Error:', error);
+    }
+  }
+
+  async onModuleDestroy() {
+    if (this.io) {
+      try {
+        // Отключаем все соединения
+        const sockets = await this.io.fetchSockets();
+        for (const socket of sockets) {
+          socket.disconnect(true);
+        }
+        
+        // Закрываем сервер и ждем пока все соединения закроются
+        await new Promise<void>((resolve) => {
+          this.io.close(() => {
+            resolve();
+          });
+        });
+      } catch (error) {
+        // Игнорируем ошибку если сервер уже не запущен
+        if (error.message !== 'Server is not running') {
+          throw error;
+        }
+      }
     }
   }
 }

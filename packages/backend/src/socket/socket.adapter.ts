@@ -6,6 +6,7 @@ import { INestApplicationContext, Logger } from '@nestjs/common';
 export class SocketAdapter extends IoAdapter {
   private readonly configService: ConfigService;
   private readonly logger = new Logger(SocketAdapter.name);
+  private server: any;
 
   constructor(app: INestApplicationContext) {
     super(app);
@@ -39,10 +40,10 @@ export class SocketAdapter extends IoAdapter {
     };
 
     this.logger.log('Socket.IO server options:', JSON.stringify(serverOptions, null, 2));
-    const server = super.createIOServer(port, serverOptions);
+    this.server = super.createIOServer(port, serverOptions);
     
     // Добавляем логирование для всех событий сервера
-    server.on('connection_error', (err: any) => {
+    this.server.on('connection_error', (err: any) => {
       this.logger.error('Socket.IO server connection error:', {
         message: err.message,
         type: err.type,
@@ -52,11 +53,11 @@ export class SocketAdapter extends IoAdapter {
       });
     });
 
-    server.on('new_namespace', (namespace: any) => {
+    this.server.on('new_namespace', (namespace: any) => {
       this.logger.log(`New namespace created: ${namespace.name}`);
     });
 
-    server.on('connect', (socket: any) => {
+    this.server.on('connect', (socket: any) => {
       this.logger.log(`Socket connected to server: ${socket.id}`, {
         handshake: socket.handshake,
         rooms: Array.from(socket.rooms || []),
@@ -64,13 +65,44 @@ export class SocketAdapter extends IoAdapter {
       });
     });
 
-    server.on('disconnect', (socket: any) => {
+    this.server.on('disconnect', (socket: any) => {
       this.logger.log(`Socket disconnected from server: ${socket.id}`, {
         reason: socket.disconnected,
         rooms: Array.from(socket.rooms || []),
       });
     });
 
-    return server;
+    return this.server;
+  }
+
+  async dispose() {
+    if (this.server) {
+      this.logger.log('Starting Socket.IO adapter disposal...');
+
+      try {
+        // 1. Отключаем всех клиентов
+        const sockets = await this.server.sockets?.sockets;
+        if (sockets) {
+          for (const [, socket] of sockets) {
+            if (!socket.disconnected) {
+              socket.disconnect(true);
+            }
+          }
+        }
+
+        // 2. Закрываем сервер
+        if (this.server.sockets) {
+          await new Promise<void>((resolve) => {
+            this.server.close(() => resolve());
+          });
+        }
+
+        this.logger.log('Socket.IO adapter disposed successfully');
+      } catch (error) {
+        this.logger.error('Error during Socket.IO adapter disposal:', error);
+      } finally {
+        this.server = null;
+      }
+    }
   }
 }

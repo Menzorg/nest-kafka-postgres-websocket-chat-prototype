@@ -1,93 +1,123 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Socket, Server } from 'socket.io';
-import { NotFoundException } from '@nestjs/common';
+import { Socket } from 'socket.io';
+import { Server } from 'socket.io';
 import { ChatGateway } from '../chat.gateway';
 import { ChatService } from '../chat.service';
 import { KafkaAdapter } from '../../adapters/kafka/kafka.adapter';
-import { Chat, ChatMessage, Message, MessageStatus, MessageDeliveryStatus } from '@webchat/common';
-
-// Создаем тестовую версию ChatGateway без декораторов
-class TestChatGateway extends ChatGateway {
-  constructor(chatService: ChatService, kafkaAdapter: KafkaAdapter) {
-    super(chatService, kafkaAdapter);
-  }
-}
+import { JwtService } from '@nestjs/jwt';
+import { UserService } from '../../user/user.service';
+import { User } from '../../user/entities/user.entity';
+import { Chat, ChatMessage, MessageDeliveryStatus } from '@webchat/common';
+import { v4 as uuidv4 } from 'uuid';
+import { WsJwtGuard } from '../../auth/ws-jwt.guard';
+import { NotFoundException } from '@nestjs/common';
 
 describe('ChatGateway', () => {
-  let gateway: TestChatGateway;
-  let chatService: ChatService;
-  let kafkaAdapter: KafkaAdapter;
+  let gateway: ChatGateway;
+  let chatService: jest.Mocked<ChatService>;
+  let kafkaAdapter: jest.Mocked<KafkaAdapter>;
+  let jwtService: JwtService;
+  let userService: UserService;
 
-  const mockServer = {
-    to: jest.fn().mockReturnThis(),
-    emit: jest.fn(),
-    sockets: {
-      adapter: {
-        rooms: new Map(),
-      },
-    },
-  } as unknown as Server;
+  const mockUser = {
+    id: 'test-user-id',
+    email: 'test@example.com',
+    password: 'hashedpassword',
+    name: 'Test User',
+    get username() { return this.name; },
+    isOnline: false,
+    createdAt: new Date(),
+    chats: [],
+    sentMessages: [],
+    validatePassword: jest.fn(),
+    hashPassword: jest.fn(),
+  } as User;
 
-  const mockClient = {
-    join: jest.fn(),
-    leave: jest.fn(),
-    emit: jest.fn(),
-    data: { user: { id: 'user1' } },
-  } as unknown as Socket;
+  const otherUser = {
+    id: 'other-user-id',
+    email: 'other@example.com',
+    name: 'Other User',
+  } as User;
 
   const mockChat: Chat = {
-    id: 'chat1',
-    participants: ['user1', 'user2'],
+    id: 'test-chat-id',
+    participants: [mockUser.id, otherUser.id],
     messages: [],
     createdAt: new Date(),
-    updatedAt: new Date(),
+    updatedAt: new Date()
   };
 
   const mockMessage: ChatMessage = {
-    id: 'msg1',
-    chatId: 'chat1',
-    senderId: 'user1',
+    id: 'test-message-id',
+    chatId: mockChat.id,
+    senderId: otherUser.id, // Сообщение от другого пользователя
     content: 'Test message',
     status: MessageDeliveryStatus.SENT,
-    createdAt: new Date(),
+    createdAt: new Date()
   };
+
+  const mockSocket = {
+    id: 'test-socket-id',
+    data: {
+      user: mockUser,
+    },
+    join: jest.fn(),
+    leave: jest.fn(),
+    emit: jest.fn(),
+    disconnect: jest.fn(),
+  } as unknown as Socket;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        {
-          provide: TestChatGateway,
-          useFactory: (chatService: ChatService, kafkaAdapter: KafkaAdapter) => {
-            return new TestChatGateway(chatService, kafkaAdapter);
-          },
-          inject: [ChatService, KafkaAdapter],
-        },
+        ChatGateway,
         {
           provide: ChatService,
           useValue: {
-            getUserChats: jest.fn().mockResolvedValue([mockChat]),
-            getUndeliveredMessages: jest.fn().mockResolvedValue([mockMessage]),
-            getChat: jest.fn().mockResolvedValue(mockChat),
-            getMessage: jest.fn().mockResolvedValue(mockMessage),
-            saveMessage: jest.fn().mockResolvedValue(mockMessage),
-          },
+            getMessage: jest.fn(),
+            getChat: jest.fn(),
+            updateMessageStatus: jest.fn(),
+            createMessage: jest.fn(),
+            findById: jest.fn(),
+            getUndeliveredMessages: jest.fn(),
+            saveMessage: jest.fn(),
+          }
         },
         {
           provide: KafkaAdapter,
           useValue: {
-            publish: jest.fn(),
+            produceMessage: jest.fn().mockResolvedValue(undefined),
             subscribe: jest.fn(),
+            publish: jest.fn(),
+          }
+        },
+        {
+          provide: JwtService,
+          useValue: {
+            verify: jest.fn().mockReturnValue({ sub: mockUser.id }),
           },
         },
+        {
+          provide: UserService,
+          useValue: {
+            findById: jest.fn().mockResolvedValue(mockUser),
+          },
+        },
+        WsJwtGuard,
       ],
     }).compile();
 
-    gateway = module.get<TestChatGateway>(TestChatGateway);
-    chatService = module.get<ChatService>(ChatService);
-    kafkaAdapter = module.get<KafkaAdapter>(KafkaAdapter);
+    gateway = module.get<ChatGateway>(ChatGateway);
+    chatService = module.get(ChatService);
+    kafkaAdapter = module.get(KafkaAdapter);
+    jwtService = module.get<JwtService>(JwtService);
+    userService = module.get<UserService>(UserService);
 
-    // @ts-ignore - we don't need all Server properties
-    gateway.server = mockServer;
+    (gateway as any).server = {
+      to: jest.fn().mockReturnValue({
+        emit: jest.fn(),
+      }),
+    };
   });
 
   afterEach(() => {
@@ -96,63 +126,216 @@ describe('ChatGateway', () => {
 
   describe('handleConnection', () => {
     it('should handle new connection', async () => {
-      await gateway.handleConnection(mockClient);
+      await gateway.handleConnection(mockSocket);
 
-      expect(mockClient.join).toHaveBeenCalledWith('user:user1');
-      expect(mockClient.join).toHaveBeenCalledWith('chat:chat1');
-      expect(mockClient.emit).toHaveBeenCalledWith('message', mockMessage);
+      expect(mockSocket.join).toHaveBeenCalledWith(`user:${mockUser.id}`);
     });
 
-    it('should disconnect client if no user id', async () => {
-      const clientWithoutUser = {
-        ...mockClient,
-        data: {},
+    it('should disconnect if no user id', async () => {
+      const invalidSocket = {
+        ...mockSocket,
+        data: { user: null },
         disconnect: jest.fn(),
       } as unknown as Socket;
 
-      await gateway.handleConnection(clientWithoutUser);
+      await gateway.handleConnection(invalidSocket);
 
-      expect(clientWithoutUser.disconnect).toHaveBeenCalled();
-      expect(mockClient.join).not.toHaveBeenCalled();
+      expect(invalidSocket.disconnect).toHaveBeenCalled();
     });
   });
 
   describe('handleDisconnect', () => {
-    it('should handle client disconnect', () => {
-      gateway.handleDisconnect(mockClient);
+    it('should handle disconnect', async () => {
+      await gateway.handleDisconnect(mockSocket);
 
-      expect(mockClient.leave).toHaveBeenCalledWith('user:user1');
+      expect(mockSocket.leave).toHaveBeenCalledWith(`user:${mockUser.id}`);
+    });
+  });
+
+  describe('handleJoinChat', () => {
+    it('should allow user to join chat', async () => {
+      jest.spyOn(chatService, 'getChat').mockResolvedValue(mockChat);
+      jest.spyOn(chatService, 'getUndeliveredMessages').mockResolvedValue([]);
+
+      const result = await gateway.handleJoinChat(mockSocket, { chatId: mockChat.id });
+
+      expect(result).toEqual({ status: 'ok' });
+      expect(mockSocket.join).toHaveBeenCalledWith(`chat:${mockChat.id}`);
+    });
+
+    it('should not allow user to join non-existent chat', async () => {
+      jest.spyOn(chatService, 'getChat').mockRejectedValue(new NotFoundException());
+
+      const response = await gateway.handleJoinChat(mockSocket, { chatId: mockChat.id });
+
+      expect(response).toEqual({
+        status: 'error',
+        message: 'Not Found'
+      });
+      expect(mockSocket.join).not.toHaveBeenCalled();
+    });
+
+    it('should not allow non-participant to join chat', async () => {
+      const nonParticipantUser = { ...mockUser, id: 'non-participant-id' };
+      const nonParticipantSocket = {
+        ...mockSocket,
+        data: { user: nonParticipantUser },
+      } as unknown as Socket;
+
+      jest.spyOn(chatService, 'getChat').mockResolvedValue(mockChat);
+
+      const response = await gateway.handleJoinChat(nonParticipantSocket, { chatId: mockChat.id });
+
+      expect(response).toEqual({
+        status: 'error',
+        message: 'User is not a participant of this chat'
+      });
+      expect(nonParticipantSocket.join).not.toHaveBeenCalled();
     });
   });
 
   describe('handleMessage', () => {
     it('should handle new message', async () => {
-      await gateway.handleMessage(mockClient, mockMessage);
+      jest.spyOn(chatService, 'getChat').mockResolvedValue(mockChat);
+      jest.spyOn(chatService, 'saveMessage').mockResolvedValue(mockMessage);
+      jest.spyOn(kafkaAdapter, 'publish').mockResolvedValue();
 
-      const expectedKafkaMessage: Message = {
-        id: mockMessage.id,
-        roomId: mockMessage.chatId,
-        senderId: mockMessage.senderId,
-        content: mockMessage.content,
-        timestamp: mockMessage.createdAt,
-        status: MessageDeliveryStatus.SENT,
+      const messagePayload = {
+        ...mockMessage,
+        senderId: mockUser.id,
       };
 
-      expect(kafkaAdapter.publish).toHaveBeenCalledWith('chat.messages', expectedKafkaMessage);
-      expect(mockClient.emit).toHaveBeenCalledWith('message:ack', { messageId: mockMessage.id });
+      const result = await gateway.handleMessage(mockSocket, messagePayload);
+
+      expect(result).toEqual({
+        status: 'ok',
+        data: mockMessage,
+      });
+      expect(chatService.saveMessage).toHaveBeenCalledWith({
+        ...messagePayload,
+        senderId: mockUser.id,
+      });
+      expect(mockSocket.emit).toHaveBeenCalledWith('message:ack', { messageId: mockMessage.id });
     });
 
-    it('should handle error when chat not found', async () => {
-      const spy = jest.spyOn(chatService, 'getChat');
-      spy.mockRejectedValueOnce(new NotFoundException('Chat not found'));
+    it('should handle message error', async () => {
+      const error = new Error('Test error');
+      jest.spyOn(chatService, 'saveMessage').mockRejectedValue(error);
 
-      await gateway.handleMessage(mockClient, mockMessage);
+      const messagePayload = {
+        ...mockMessage,
+        senderId: mockUser.id,
+      };
 
-      expect(mockClient.emit).toHaveBeenCalledWith('message:error', {
-        messageId: mockMessage.id,
-        error: 'Chat not found',
+      const response = await gateway.handleMessage(mockSocket, messagePayload);
+
+      expect(response).toEqual({
+        status: 'error',
+        message: 'Test error'
       });
-      expect(kafkaAdapter.publish).not.toHaveBeenCalled();
+      expect(chatService.saveMessage).toHaveBeenCalled();
+    });
+  });
+
+  describe('handleMessageRead', () => {
+    it('should handle message read status', async () => {
+      const messageDto = {
+        messageId: mockMessage.id,
+      };
+
+      jest.spyOn(chatService, 'getMessage').mockResolvedValue(mockMessage);
+      jest.spyOn(chatService, 'getChat').mockResolvedValue(mockChat);
+      jest.spyOn(chatService, 'updateMessageStatus').mockResolvedValue();
+
+      const result = await gateway.handleMessageRead(mockSocket, messageDto);
+
+      expect(result.status).toBe('ok');
+      expect(chatService.getMessage).toHaveBeenCalledWith(messageDto.messageId);
+      expect(chatService.getChat).toHaveBeenCalledWith(mockMessage.chatId);
+      expect(chatService.updateMessageStatus).toHaveBeenCalledWith(
+        messageDto.messageId,
+        MessageDeliveryStatus.READ
+      );
+    });
+
+    it('should not update status if user is sender', async () => {
+      const senderMessage = {
+        ...mockMessage,
+        senderId: mockUser.id,
+      };
+
+      jest.spyOn(chatService, 'getMessage').mockResolvedValue(senderMessage);
+      jest.spyOn(chatService, 'getChat').mockResolvedValue(mockChat);
+      jest.spyOn(chatService, 'updateMessageStatus').mockResolvedValue();
+
+      const messageDto = {
+        messageId: senderMessage.id,
+      };
+
+      const result = await gateway.handleMessageRead(mockSocket, messageDto);
+
+      expect(result).toEqual({ status: 'ok' });
+      expect(chatService.getMessage).toHaveBeenCalledWith(messageDto.messageId);
+      expect(chatService.getChat).toHaveBeenCalledWith(senderMessage.chatId);
+      expect(chatService.updateMessageStatus).not.toHaveBeenCalled();
+    });
+
+    it('should handle non-existent message', async () => {
+      jest.spyOn(chatService, 'getMessage').mockResolvedValue(undefined);
+
+      const messageDto = {
+        messageId: 'non-existent-id',
+      };
+
+      const result = await gateway.handleMessageRead(mockSocket, messageDto);
+
+      expect(result).toEqual({
+        status: 'error',
+        message: 'Message not found',
+      });
+      expect(chatService.updateMessageStatus).not.toHaveBeenCalled();
+    });
+
+    it('should handle unauthorized user', async () => {
+      const unauthorizedSocket = {
+        ...mockSocket,
+        data: {},
+      } as unknown as Socket;
+
+      const messageDto = {
+        messageId: mockMessage.id,
+      };
+
+      const result = await gateway.handleMessageRead(unauthorizedSocket, messageDto);
+
+      expect(result).toEqual({
+        status: 'error',
+        message: 'Unauthorized',
+      });
+      expect(chatService.getMessage).not.toHaveBeenCalled();
+      expect(chatService.updateMessageStatus).not.toHaveBeenCalled();
+    });
+
+    it('should handle non-participant user', async () => {
+      const nonParticipantChat = {
+        ...mockChat,
+        participants: ['other-user-1', 'other-user-2'],
+      };
+
+      jest.spyOn(chatService, 'getMessage').mockResolvedValue(mockMessage);
+      jest.spyOn(chatService, 'getChat').mockResolvedValue(nonParticipantChat);
+
+      const messageDto = {
+        messageId: mockMessage.id,
+      };
+
+      const result = await gateway.handleMessageRead(mockSocket, messageDto);
+
+      expect(result).toEqual({
+        status: 'error',
+        message: 'User is not a participant of this chat',
+      });
+      expect(chatService.updateMessageStatus).not.toHaveBeenCalled();
     });
   });
 });
