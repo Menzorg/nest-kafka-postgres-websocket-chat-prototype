@@ -173,6 +173,19 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
   async handleConnection(client: Socket) {
     try {
+      this.logger.log('=== New client connection ===');
+      this.logger.log('Client ID:', client.id);
+      this.logger.log('User data:', client.data.user);
+      this.logger.log('Connected:', client.connected);
+      this.logger.log('Disconnected:', client.disconnected);
+      this.logger.log('Handshake:', client.handshake);
+      this.logger.log('Rooms:', Array.from(client.rooms));
+      this.logger.log('Connected clients before:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
+
       const user = client.data.user;
       if (!user) {
         this.logger.error('No user data in socket');
@@ -188,6 +201,16 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         userId: user.id,
         lastActivity: new Date()
       });
+
+      // Добавляем клиента в комнату пользователя для получения уведомлений
+      client.join(`user:${user.id}`);
+      this.logger.log(`Client joined room user:${user.id}`);
+
+      this.logger.log('Connected clients after:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
 
       // Отправляем подтверждение подключения
       client.emit('connection:established', { 
@@ -206,19 +229,30 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   handleDisconnect(client: Socket) {
     try {
       this.logger.log('=== Handling disconnect ===');
-      this.logger.log(`Client ID: ${client.id}`);
-      this.logger.log('Connected clients:', Array.from(this.connectedClients.keys()));
+      this.logger.log('Client ID:', client.id);
+      this.logger.log('Connected:', client.connected);
+      this.logger.log('Disconnected:', client.disconnected);
+      this.logger.log('Handshake:', client.handshake);
+      this.logger.log('Rooms:', Array.from(client.rooms));
+      this.logger.log('Connected clients before:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
       
       const clientInfo = this.connectedClients.get(client.id);
       if (clientInfo) {
-        this.logger.log('Client info found:', { userId: clientInfo.userId });
+        this.logger.log('Client info found:', { 
+          userId: clientInfo.userId,
+          connected: clientInfo.socket.connected,
+          rooms: Array.from(clientInfo.socket.rooms)
+        });
         
         // Сначала удаляем клиента из списка
         this.connectedClients.delete(client.id);
         this.logger.log('Client removed from connected clients');
-        this.logger.log('Remaining clients:', Array.from(this.connectedClients.keys()));
         
-        // Отправляем событие через broadcast, чтобы не отправлять отключающемуся клиенту
+        // Отправляем событие через broadcast
         this.logger.log('Broadcasting offline status');
         this.io.sockets.except(client.id).emit('users:update', { 
           userId: clientInfo.userId, 
@@ -228,6 +262,12 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       } else {
         this.logger.warn('Client info not found for disconnecting client');
       }
+
+      this.logger.log('Connected clients after:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
       
       this.logger.log(`Client disconnected: ${client.id}`);
     } catch (error) {
@@ -260,6 +300,21 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   @SubscribeMessage('chat:get')
   async handleGetChat(client: Socket, payload: { recipientId: string }) {
     try {
+      this.logger.log('=== Handling chat:get ===');
+      this.logger.log('Client:', { 
+        id: client.id, 
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+      this.logger.log('Connected clients:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
+
       const userId = client.data.user.id;
       let chat = await this.chatService.findChatByParticipants(userId, payload.recipientId);
       
@@ -279,24 +334,46 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   @SubscribeMessage('message')
   async handleMessage(client: Socket, payload: { chatId: string; content: string }) {
     try {
-      const senderId = client.data.user.id;
+      this.logger.log('=== Handling message ===');
+      this.logger.log('Client:', { 
+        id: client.id, 
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+      this.logger.log('Connected clients:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
+
+      const userId = client.data.user.id;
       const chat = await this.chatService.getChat(payload.chatId);
-      
-      if (!chat.participants.includes(senderId)) {
+
+      if (!chat) {
+        this.logger.error(`Chat ${payload.chatId} not found`);
+        throw new Error('Chat not found');
+      }
+
+      if (!chat.participants.includes(userId)) {
+        this.logger.error(`User ${userId} is not a participant of chat ${payload.chatId}`);
         throw new Error('User is not a participant of this chat');
       }
 
-      const now = new Date();
-      const message: ChatMessage = {
+      const message = await this.chatService.saveMessage({
         id: uuidv4(),
         chatId: payload.chatId,
-        senderId,
+        senderId: userId,
         content: payload.content,
         status: MessageDeliveryStatus.SENT,
-        createdAt: now,
-      };
+        createdAt: new Date()
+      });
 
-      await this.chatService.saveMessage(message);
+      this.logger.log('Message saved:', message);
+      this.logger.log('Emitting to room:', `chat:${payload.chatId}`);
+      this.logger.log('Room members:', Array.from(this.io.sockets.adapter.rooms.get(`chat:${payload.chatId}`) || []));
 
       // Отправляем сообщение всем участникам чата
       this.io.to(`chat:${payload.chatId}`).emit('message', message);
@@ -311,6 +388,20 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   @SubscribeMessage('users:list')
   async handleUsersList(client: Socket) {
     try {
+      this.logger.log('=== Handling users:list ===');
+      this.logger.log('Client:', { 
+        id: client.id, 
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Connected clients:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
+
       const users = await this.authService.getAllUsers();
       const usersWithStatus = users.map(user => ({
         ...user,
@@ -329,7 +420,19 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   async handleChatJoin(client: Socket, payload: { chatId: string }) {
     try {
       this.logger.log('=== Handling chat:join ===');
+      this.logger.log('Client:', { 
+        id: client.id, 
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
       this.logger.log('Payload:', payload);
+      this.logger.log('Connected clients:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
 
       const userId = client.data.user.id;
       const chat = await this.chatService.getChat(payload.chatId);
@@ -347,6 +450,8 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       // Присоединяем клиента к комнате чата
       await client.join(`chat:${payload.chatId}`);
       this.logger.log(`User ${userId} joined chat ${payload.chatId}`);
+      this.logger.log('Updated client rooms:', Array.from(client.rooms));
+      this.logger.log('Room members:', Array.from(this.io.sockets.adapter.rooms.get(`chat:${payload.chatId}`) || []));
 
       // Получаем непрочитанные сообщения
       const undeliveredMessages = await this.chatService.getUndeliveredMessages(userId, payload.chatId);
@@ -375,7 +480,19 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   async handleMessageRead(client: Socket, payload: { messageId: string }) {
     try {
       this.logger.log('=== Handling message:read ===');
+      this.logger.log('Client:', { 
+        id: client.id, 
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
       this.logger.log('Payload:', payload);
+      this.logger.log('Connected clients:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      })));
 
       const userId = client.data.user.id;
       const message = await this.chatService.getMessage(payload.messageId);
@@ -384,6 +501,10 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         this.logger.error(`Message ${payload.messageId} not found`);
         return { status: 'error', message: 'Message not found' };
       }
+
+      this.logger.log('Message found:', message);
+      this.logger.log('Sender room:', `user:${message.senderId}`);
+      this.logger.log('Room members:', Array.from(this.io.sockets.adapter.rooms.get(`user:${message.senderId}`) || []));
 
       // Проверяем, что пользователь является участником чата
       const chat = await this.chatService.getChat(message.chatId);
@@ -395,13 +516,19 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       // Обновляем статус сообщения
       await this.chatService.updateMessageStatus(payload.messageId, MessageDeliveryStatus.READ);
       
-      // Уведомляем отправителя об обновлении статуса
-      this.io.to(`user:${message.senderId}`).emit('message:status', {
+      const statusUpdate = {
         messageId: payload.messageId,
         status: MessageDeliveryStatus.READ,
         timestamp: new Date().toISOString()
-      });
-
+      };
+      
+      this.logger.log('Emitting status update:', statusUpdate);
+      this.logger.log('To room:', `user:${message.senderId}`);
+      
+      // Уведомляем отправителя об обновлении статуса
+      this.io.to(`user:${message.senderId}`).emit('message:status', statusUpdate);
+      
+      this.logger.log('Status update emitted');
       this.logger.log(`Message ${payload.messageId} marked as read by user ${userId}`);
       return { status: 'ok' };
     } catch (error) {

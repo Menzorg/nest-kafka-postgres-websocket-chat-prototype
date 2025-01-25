@@ -4,13 +4,13 @@ export interface LoginDto {
 }
 
 export interface RegisterDto extends LoginDto {
-  username: string;
+  name: string;
 }
 
 export interface JwtPayload {
   sub: string;
   email: string;
-  username: string;
+  name: string;
 }
 
 export interface AuthResponse {
@@ -18,6 +18,6 @@ export interface AuthResponse {
   user: {
     id: string;
     email: string;
-    username: string;
+    name: string;
   };
 }

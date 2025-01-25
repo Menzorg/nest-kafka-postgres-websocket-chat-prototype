@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { io, Socket } from 'socket.io-client';
+import { io, Socket as ClientSocket } from 'socket.io-client';
 import { SocketGateway } from '../socket.gateway';
 import { SocketAdapter } from '../socket.adapter';
 import { AuthService } from '../../auth/auth.service';
@@ -11,14 +11,19 @@ import { JwtModule } from '@nestjs/jwt';
 import { UnauthorizedException } from '@nestjs/common';
 import { UserService } from '../../user/user.service';
 
+// Расширяем тип Socket для тестов
+interface TestSocket extends ClientSocket {
+  rooms?: Set<string>;
+}
+
 jest.setTimeout(15000);
 
 describe('SocketGateway', () => {
   let app: INestApplication;
   let gateway: SocketGateway;
   let socketAdapter: SocketAdapter;
-  let socket: Socket | null = null;
-  let socket2: Socket | null = null;
+  let socket: TestSocket | null = null;
+  let socket2: TestSocket | null = null;
   let authService: AuthService;
   let jwtService: JwtService;
   let userService: UserService;
@@ -214,7 +219,7 @@ describe('SocketGateway', () => {
   });
 
   describe('Authentication', () => {
-    let authSocket: Socket | null = null;
+    let authSocket: TestSocket | null = null;
 
     beforeEach(async () => {
       // Создаем тестового пользователя
