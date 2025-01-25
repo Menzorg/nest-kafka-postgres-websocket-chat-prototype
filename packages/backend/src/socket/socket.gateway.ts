@@ -13,6 +13,7 @@ import { AuthService } from '../auth/auth.service';
 import { ChatService } from '../chat/chat.service';
 import { ChatMessage, MessageDeliveryStatus } from '@webchat/common';
 import { v4 as uuidv4 } from 'uuid';
+import { ConfigService } from '@nestjs/config';
 
 interface ConnectedClient {
   socket: Socket;
@@ -22,7 +23,6 @@ interface ConnectedClient {
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true
   }
 })
@@ -37,6 +37,7 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private jwtService: JwtService,
     private authService: AuthService,
     private chatService: ChatService,
+    private configService: ConfigService,
   ) {}
 
   public async closeServer() {
@@ -90,7 +91,17 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   }
 
   afterInit(server: Server) {
-    this.logger.log('=== WebSocket Gateway initialized ===');
+    this.logger.log('WebSocket Gateway initialized');
+    
+    // Настраиваем CORS после инициализации
+    if (server) {
+      const corsOrigin = this.configService.get('FRONTEND_URL', 'http://localhost:3000');
+      this.logger.log(`Setting CORS origin: ${corsOrigin}`);
+      server.engine.opts.cors = {
+        origin: corsOrigin,
+        credentials: true
+      };
+    }
 
     // Добавляем middleware для проверки токена
     server.use(async (socket: Socket, next) => {
@@ -157,7 +168,7 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     });
 
     // Запускаем периодическую очистку мертвых соединений
-    this.cleanupInterval = setInterval(() => this.cleanupDeadConnections(), 60000);
+    this.cleanupInterval = setInterval(() => this.cleanupDeadConnections(), 30000);
   }
 
   async handleConnection(client: Socket) {
@@ -233,8 +244,16 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     const data = { userId, isOnline };
     this.logger.log('Emitting data:', data);
     
-    // Отправляем всем подключенным клиентам
-    this.io.sockets.emit('users:update', data);
+    // Отправляем всем подключенным клиентам, кроме отключающегося
+    const disconnectingClientId = Array.from(this.connectedClients.entries())
+      .find(([_, client]) => client.userId === userId)?.[0];
+
+    if (disconnectingClientId && !isOnline) {
+      this.io.sockets.except(disconnectingClientId).emit('users:update', data);
+    } else {
+      this.io.sockets.emit('users:update', data);
+    }
+    
     this.logger.log('Status broadcasted');
   }
 
