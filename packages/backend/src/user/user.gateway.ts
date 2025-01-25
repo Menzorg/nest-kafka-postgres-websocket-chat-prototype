@@ -32,21 +32,37 @@ export class UserGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Присоединяем клиента к его персональной комнате
     client.join(`user:${userId}`);
 
-    // Обновляем статус пользователя
-    const status = await this.userService.updateUserStatus(userId, true);
-
-    // Оповещаем всех о новом статусе
-    this.server.emit('user:status', status);
+    try {
+      // Обновляем статус пользователя
+      this.userService.updateUserStatus(userId, true);
+      
+      // Получаем обновленный статус
+      const status = await this.userService.getUserStatus(userId);
+      if (status) {
+        // Оповещаем всех о новом статусе
+        this.server.emit('user:status', status);
+      }
+    } catch (error) {
+      console.error('Error updating user status on connection:', error);
+    }
   }
 
   async handleDisconnect(client: Socket) {
     const userId = client.data?.user?.id;
     if (!userId) return;
 
-    // Обновляем статус пользователя
-    const status = await this.userService.updateUserStatus(userId, false);
-
-    // Оповещаем всех о новом статусе
-    this.server.emit('user:status', status);
+    try {
+      // Обновляем статус пользователя
+      this.userService.updateUserStatus(userId, false);
+      
+      // Получаем обновленный статус
+      const status = await this.userService.getUserStatus(userId);
+      if (status) {
+        // Оповещаем всех о новом статусе
+        this.server.emit('user:status', status);
+      }
+    } catch (error) {
+      console.error('Error updating user status on disconnection:', error);
+    }
   }
 }

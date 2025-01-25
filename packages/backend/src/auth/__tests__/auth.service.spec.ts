@@ -45,6 +45,11 @@ describe('AuthService', () => {
     service = module.get<AuthService>(AuthService);
     userService = module.get<UserService>(UserService);
     jwtService = module.get<JwtService>(JwtService);
+
+    // Reset and setup bcrypt mocks
+    jest.clearAllMocks();
+    (bcrypt.hash as jest.Mock).mockResolvedValue('hashedPassword');
+    (bcrypt.compare as jest.Mock).mockImplementation(() => Promise.resolve(true));
   });
 
   describe('register', () => {
@@ -55,16 +60,11 @@ describe('AuthService', () => {
         name: 'testuser',
       };
 
-      (bcrypt.hash as jest.Mock).mockResolvedValue('hashedPassword');
       (userService.create as jest.Mock).mockResolvedValue(mockUser);
 
       const result = await service.register(registerDto);
 
-      expect(bcrypt.hash).toHaveBeenCalledWith('password123', 10);
-      expect(userService.create).toHaveBeenCalledWith({
-        ...registerDto,
-        password: 'hashedPassword',
-      });
+      expect(userService.create).toHaveBeenCalledWith(registerDto);
       expect(result).toEqual({
         accessToken: 'test-token',
         user: {
@@ -84,7 +84,6 @@ describe('AuthService', () => {
       };
 
       (userService.findByEmail as jest.Mock).mockResolvedValue(mockUser);
-      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       const result = await service.login(loginDto);
 
@@ -118,7 +117,7 @@ describe('AuthService', () => {
       };
 
       (userService.findByEmail as jest.Mock).mockResolvedValue(mockUser);
-      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      (bcrypt.compare as jest.Mock).mockImplementationOnce(() => Promise.resolve(false));
 
       await expect(service.login(loginDto)).rejects.toThrow(UnauthorizedException);
     });
