@@ -194,49 +194,6 @@ describe('ChatGateway', () => {
     });
   });
 
-  describe('handleMessage', () => {
-    it('should handle new message', async () => {
-      jest.spyOn(chatService, 'getChat').mockResolvedValue(mockChat);
-      jest.spyOn(chatService, 'saveMessage').mockResolvedValue(mockMessage);
-      jest.spyOn(kafkaAdapter, 'publish').mockResolvedValue();
-
-      const messagePayload = {
-        ...mockMessage,
-        senderId: mockUser.id,
-      };
-
-      const result = await gateway.handleMessage(mockSocket, messagePayload);
-
-      expect(result).toEqual({
-        status: 'ok',
-        data: mockMessage,
-      });
-      expect(chatService.saveMessage).toHaveBeenCalledWith({
-        ...messagePayload,
-        senderId: mockUser.id,
-      });
-      expect(mockSocket.emit).toHaveBeenCalledWith('message:ack', { messageId: mockMessage.id });
-    });
-
-    it('should handle message error', async () => {
-      const error = new Error('Test error');
-      jest.spyOn(chatService, 'saveMessage').mockRejectedValue(error);
-
-      const messagePayload = {
-        ...mockMessage,
-        senderId: mockUser.id,
-      };
-
-      const response = await gateway.handleMessage(mockSocket, messagePayload);
-
-      expect(response).toEqual({
-        status: 'error',
-        message: 'Test error'
-      });
-      expect(chatService.saveMessage).toHaveBeenCalled();
-    });
-  });
-
   describe('handleMessageRead', () => {
     it('should handle message read status', async () => {
       const messageDto = {

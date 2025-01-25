@@ -12,6 +12,7 @@ import { WsJwtGuard } from '../auth/ws-jwt.guard';
 import { ChatService } from './chat.service';
 import { KafkaAdapter } from '../adapters/kafka/kafka.adapter';
 import { ChatMessage, Message, MessageStatus, MessageDeliveryStatus } from '@webchat/common';
+import { v4 as uuidv4 } from 'uuid';
 
 @UseGuards(WsJwtGuard)
 @WebSocketGateway({
@@ -35,11 +36,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
 
   private async subscribeToKafkaEvents() {
     try {
-      await this.kafkaAdapter.subscribe<Message>('chat.messages', async (message) => {
-        const room = `chat:${message.roomId}`;
-        this.server.to(room).emit('message', message);
-      });
-
       await this.kafkaAdapter.subscribe<MessageStatus>('chat.message.status', async (status) => {
         const room = `user:${status.senderId}`;
         this.server.to(room).emit('message:status', status);
@@ -247,64 +243,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       updatedMessages: statusUpdates.length,
       socketId
     });
-  }
-
-  @SubscribeMessage('message')
-  async handleMessage(client: Socket, payload: ChatMessage) {
-    const userId = client.data?.user?.id;
-    if (!userId) {
-      return;
-    }
-
-    try {
-      console.log('=== New Message Request ===', {
-        userId,
-        chatId: payload.chatId,
-        content: payload.content
-      });
-
-      // Проверяем существование чата
-      await this.chatService.getChat(payload.chatId);
-
-      // Сохраняем сообщение
-      const message = await this.chatService.saveMessage({
-        ...payload,
-        senderId: userId,
-      });
-
-      console.log('=== Message Saved ===', message);
-
-      // Отправляем сообщение в Kafka
-      const kafkaMessage = {
-        id: message.id,
-        roomId: message.chatId,
-        senderId: message.senderId,
-        content: message.content,
-        timestamp: message.createdAt,
-        status: MessageDeliveryStatus.SENT,
-      };
-      console.log('=== Publishing Message to Kafka ===', kafkaMessage);
-      
-      await this.kafkaAdapter.publish('chat.messages', kafkaMessage);
-
-      // Отправляем подтверждение отправителю
-      client.emit('message:ack', { messageId: message.id });
-
-      return {
-        status: 'ok',
-        data: message,
-      };
-    } catch (error) {
-      console.error('Failed to handle message:', error);
-      client.emit('message:error', {
-        messageId: payload.id,
-        error: error.message,
-      });
-      return {
-        status: 'error',
-        message: error.message,
-      };
-    }
   }
 
   @SubscribeMessage('message:read')

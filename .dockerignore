@@ -1,0 +1,24 @@
+# Dependencies
+node_modules
+dist
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.*
+!.docker.env
+
+# Build output
+.next
+build
+out

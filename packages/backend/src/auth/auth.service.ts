@@ -51,12 +51,12 @@ export class AuthService {
     }
     this.logger.log('User found with ID:', user.id);
 
-    this.logger.log('Comparing passwords...');
+    this.logger.log('=== Password comparison ===');
     this.logger.log('Input password:', loginDto.password);
-    this.logger.log('Stored password:', user.password);
+    this.logger.log('Stored hashed password:', user.password);
     
     const isPasswordValid = await bcrypt.compare(loginDto.password, user.password);
-    this.logger.log('Password valid:', isPasswordValid);
+    this.logger.log('Password comparison result:', isPasswordValid);
     
     if (!isPasswordValid) {
       this.logger.error('Invalid password');

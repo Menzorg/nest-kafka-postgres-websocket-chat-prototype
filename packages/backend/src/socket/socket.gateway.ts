@@ -297,6 +297,87 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     this.logger.log('Status broadcasted');
   }
 
+  @SubscribeMessage('message')
+  async handleMessage(client: Socket, payload: { chatId: string; content: string }) {
+    const userId = client.data?.user?.id;
+    if (!userId) {
+      this.logger.error('=== Message handling failed: No user ID ===');
+      return;
+    }
+
+    try {
+      const requestId = uuidv4(); // Уникальный ID для каждого запроса
+      this.logger.log(`=== Starting message handling (Request ID: ${requestId}) ===`);
+      this.logger.log('Client:', { 
+        id: client.id, 
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      // Проверяем существование чата
+      this.logger.log(`[${requestId}] Getting chat for user ${userId}`);
+      const chat = await this.chatService.getChat(payload.chatId);
+
+      if (!chat) {
+        this.logger.error(`[${requestId}] Chat ${payload.chatId} not found`);
+        throw new Error('Chat not found');
+      }
+
+      if (!chat.participants.includes(userId)) {
+        this.logger.error(`[${requestId}] User ${userId} is not a participant of chat ${payload.chatId}`);
+        throw new Error('User is not a participant of this chat');
+      }
+
+      // Генерируем ID для сообщения и временную метку
+      const messageId = uuidv4();
+      const timestamp = new Date();
+
+      this.logger.log(`[${requestId}] Saving message`);
+      const message = await this.chatService.saveMessage({
+        id: messageId,
+        chatId: payload.chatId,
+        senderId: userId,
+        content: payload.content,
+        status: MessageDeliveryStatus.SENT,
+        createdAt: timestamp
+      });
+
+      this.logger.log(`[${requestId}] Message saved:`, message);
+      this.logger.log(`[${requestId}] Emitting to room:`, `chat:${payload.chatId}`);
+      this.logger.log(`[${requestId}] Room members:`, Array.from(this.io.sockets.adapter.rooms.get(`chat:${payload.chatId}`) || []));
+
+      // Отправляем сообщение всем участникам чата
+      this.io.to(`chat:${payload.chatId}`).emit('message', message);
+      
+      // Отправляем подтверждение отправителю
+      client.emit('message:ack', { messageId: message.id });
+
+      this.logger.log(`[${requestId}] Message emitted to room and ACK sent`);
+      this.logger.log(`=== Finished message handling (Request ID: ${requestId}) ===`);
+
+      return {
+        status: 'ok',
+        id: message.id,
+        data: message,
+      };
+    } catch (error) {
+      this.logger.error('Error in handleMessage:', error);
+      // Отправляем ошибку клиенту
+      client.emit('message:error', {
+        messageId: uuidv4(),
+        error: error.message,
+      });
+
+      return {
+        status: 'error',
+        error: error.message,
+      };
+    }
+  }
+
   @SubscribeMessage('chat:get')
   async handleGetChat(client: Socket, payload: { recipientId: string }) {
     try {
@@ -327,60 +408,6 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       return { chatId: chat.id, messages };
     } catch (error) {
       this.logger.error('Error in handleGetChat:', error);
-      throw error;
-    }
-  }
-
-  @SubscribeMessage('message')
-  async handleMessage(client: Socket, payload: { chatId: string; content: string }) {
-    try {
-      this.logger.log('=== Handling message ===');
-      this.logger.log('Client:', { 
-        id: client.id, 
-        userId: client.data?.user?.id,
-        connected: client.connected,
-        disconnected: client.disconnected,
-        rooms: Array.from(client.rooms)
-      });
-      this.logger.log('Payload:', payload);
-      this.logger.log('Connected clients:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
-        socketId: id,
-        userId: client.userId,
-        connected: client.socket.connected
-      })));
-
-      const userId = client.data.user.id;
-      const chat = await this.chatService.getChat(payload.chatId);
-
-      if (!chat) {
-        this.logger.error(`Chat ${payload.chatId} not found`);
-        throw new Error('Chat not found');
-      }
-
-      if (!chat.participants.includes(userId)) {
-        this.logger.error(`User ${userId} is not a participant of chat ${payload.chatId}`);
-        throw new Error('User is not a participant of this chat');
-      }
-
-      const message = await this.chatService.saveMessage({
-        id: uuidv4(),
-        chatId: payload.chatId,
-        senderId: userId,
-        content: payload.content,
-        status: MessageDeliveryStatus.SENT,
-        createdAt: new Date()
-      });
-
-      this.logger.log('Message saved:', message);
-      this.logger.log('Emitting to room:', `chat:${payload.chatId}`);
-      this.logger.log('Room members:', Array.from(this.io.sockets.adapter.rooms.get(`chat:${payload.chatId}`) || []));
-
-      // Отправляем сообщение всем участникам чата
-      this.io.to(`chat:${payload.chatId}`).emit('message', message);
-
-      return message;
-    } catch (error) {
-      this.logger.error('Error in handleMessage:', error);
       throw error;
     }
   }

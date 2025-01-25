@@ -31,7 +31,8 @@ export class KafkaAdapter implements OnModuleInit, OnModuleDestroy {
   constructor(config?: KafkaConfig) {
     this.kafka = new Kafka({
       clientId: config?.clientId || 'webchat',
-      brokers: config?.brokers || [process.env.KAFKA_BROKER || 'localhost:29092'],
+      brokers: config?.brokers || ['kafka:9092'],
+      retry: this.retryOptions,
     });
 
     this.producer = this.kafka.producer({

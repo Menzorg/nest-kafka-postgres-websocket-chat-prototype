@@ -153,13 +153,14 @@ export class ChatService {
       throw new NotFoundException('Sender not found');
     }
 
+    // Используем переданный ID сообщения
     const message = this.messageRepository.create({
-      id: uuidv4(),
+      id: messageDto.id,
       chatId: messageDto.chatId,
       senderId: messageDto.senderId,
       content: messageDto.content,
       status: MessageDeliveryStatus.SENT,
-      createdAt: new Date(),
+      createdAt: messageDto.createdAt || new Date(),
     });
 
     const savedMessage = await this.messageRepository.save(message);

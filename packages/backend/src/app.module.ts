@@ -45,9 +45,10 @@ import { KafkaAdapter } from './adapters/kafka/kafka.adapter';
     {
       provide: KafkaAdapter,
       useFactory: (configService: ConfigService) => {
+        const isDocker = configService.get('IS_DOCKER', 'false') === 'true';
         return new KafkaAdapter({
           clientId: configService.get('KAFKA_CLIENT_ID') || 'webchat',
-          brokers: [configService.get('KAFKA_BROKER') || 'localhost:29092'],
+          brokers: [configService.get('KAFKA_BROKERS') || (isDocker ? 'kafka:9092' : 'localhost:29092')],
           groupId: configService.get('KAFKA_GROUP_ID') || 'webchat-group'
         });
       },
