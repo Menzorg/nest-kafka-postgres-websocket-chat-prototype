@@ -31,19 +31,9 @@ export class ChatService {
       throw new NotFoundException(`User with ID ${userId2} not found`);
     }
 
-    // Проверяем, существует ли уже чат между этими пользователями
-    const existingChat = await this.chatRepository
-      .createQueryBuilder('chat')
-      .innerJoinAndSelect('chat.participants', 'participant')
-      .where('participant.id IN (:...userIds)', { userIds: [userId1, userId2] })
-      .getOne();
-
-    if (existingChat) {
-      throw new ConflictException('Chat between these users already exists');
-    }
-
     // Создаем новый чат
     const chat = this.chatRepository.create({
+      id: uuidv4(), // Генерируем UUID для чата
       participants: [user1, user2]
     });
 

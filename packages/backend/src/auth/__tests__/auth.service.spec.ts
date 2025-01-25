@@ -50,9 +50,9 @@ describe('AuthService', () => {
   describe('register', () => {
     it('should register a new user', async () => {
       const registerDto: RegisterDto = {
-        email: 'test@test.com',
-        password: 'password',
-        username: 'testuser',
+        email: 'test@example.com',
+        password: 'password123',
+        name: 'testuser',
       };
 
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashedPassword');
@@ -60,7 +60,7 @@ describe('AuthService', () => {
 
       const result = await service.register(registerDto);
 
-      expect(bcrypt.hash).toHaveBeenCalledWith('password', 10);
+      expect(bcrypt.hash).toHaveBeenCalledWith('password123', 10);
       expect(userService.create).toHaveBeenCalledWith({
         ...registerDto,
         password: 'hashedPassword',
@@ -70,7 +70,7 @@ describe('AuthService', () => {
         user: {
           id: mockUser.id,
           email: mockUser.email,
-          username: mockUser.name,
+          name: mockUser.name,
         },
       });
     });
@@ -95,7 +95,7 @@ describe('AuthService', () => {
         user: {
           id: mockUser.id,
           email: mockUser.email,
-          username: mockUser.name,
+          name: mockUser.name,
         },
       });
     });

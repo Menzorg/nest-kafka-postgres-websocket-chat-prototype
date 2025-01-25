@@ -23,6 +23,7 @@ export class UserService {
   async create(dto: RegisterDto & { password: string }) {
     this.logger.log('=== Creating new user ===');
     this.logger.log('Email:', dto.email);
+    this.logger.log('Name:', dto.name);
     
     const existingUser = await this.findByEmail(dto.email);
     if (existingUser) {
@@ -31,7 +32,9 @@ export class UserService {
     }
 
     const user = this.userRepository.create({
-      ...dto,
+      email: dto.email,
+      password: dto.password, 
+      name: dto.name,
     });
 
     await this.userRepository.save(user);

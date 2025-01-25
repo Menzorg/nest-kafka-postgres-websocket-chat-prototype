@@ -77,13 +77,13 @@ describe('ChatController (e2e)', () => {
       const registerDto1: RegisterDto = {
         email: 'testuser1@example.com',
         password: 'password123',
-        username: 'testuser1',
+        name: 'testuser1',
       };
 
       const registerDto2: RegisterDto = {
         email: 'testuser2@example.com',
         password: 'password123',
-        username: 'testuser2',
+        name: 'testuser2',
       };
 
       testUser1 = await userService.create(registerDto1);

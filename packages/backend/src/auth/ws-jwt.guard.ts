@@ -37,13 +37,15 @@ export class WsJwtGuard implements CanActivate {
   }
 
   private extractToken(client: Socket): string | undefined {
-    const auth = client.handshake.auth.token || client.handshake.headers.authorization;
+    const rawToken = client.handshake.auth.token || client.handshake.headers.authorization;
     
-    if (!auth) {
+    if (!rawToken) {
       return undefined;
     }
 
-    const [type, token] = auth.split(' ');
-    return type === 'Bearer' ? token : undefined;
+    // Извлекаем токен из Bearer строки
+    return rawToken.startsWith('Bearer ') 
+      ? rawToken.substring(7) 
+      : rawToken;
   }
 }

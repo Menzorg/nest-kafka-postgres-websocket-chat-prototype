@@ -23,6 +23,14 @@ export class User {
   @Column()
   password: string;
 
+  @BeforeInsert()
+  async hashPassword() {
+    console.log('=== Hashing password ===');
+    console.log('Original password:', this.password);
+    this.password = await bcrypt.hash(this.password, 10);
+    console.log('Hashed password:', this.password);
+  }
+
   @ApiProperty({
     description: 'Display name of the user',
     example: 'John Doe'
@@ -58,14 +66,6 @@ export class User {
 
   @OneToMany(() => Message, message => message.senderId)
   sentMessages: Message[];
-
-  @BeforeInsert()
-  async hashPassword() {
-    if (this.password) {
-      const salt = await bcrypt.genSalt();
-      this.password = await bcrypt.hash(this.password, salt);
-    }
-  }
 
   async validatePassword(password: string): Promise<boolean> {
     return bcrypt.compare(password, this.password);

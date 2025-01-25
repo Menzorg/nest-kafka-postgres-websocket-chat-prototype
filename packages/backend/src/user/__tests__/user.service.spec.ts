@@ -49,7 +49,7 @@ describe('UserService', () => {
     const createUserDto = {
       email: 'test@example.com',
       password: 'password123',
-      username: 'Test User', 
+      name: 'Test User',
     } as RegisterDto & { password: string };
 
     it('should create a new user', async () => {

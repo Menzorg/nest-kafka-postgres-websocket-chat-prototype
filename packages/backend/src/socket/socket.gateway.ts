@@ -194,17 +194,28 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
   handleDisconnect(client: Socket) {
     try {
+      this.logger.log('=== Handling disconnect ===');
+      this.logger.log(`Client ID: ${client.id}`);
+      this.logger.log('Connected clients:', Array.from(this.connectedClients.keys()));
+      
       const clientInfo = this.connectedClients.get(client.id);
       if (clientInfo) {
-        // Оповещаем других пользователей
-        this.broadcastUserStatus(clientInfo.userId, false);
+        this.logger.log('Client info found:', { userId: clientInfo.userId });
         
-        // Удаляем клиента из списка
+        // Сначала удаляем клиента из списка
         this.connectedClients.delete(client.id);
+        this.logger.log('Client removed from connected clients');
+        this.logger.log('Remaining clients:', Array.from(this.connectedClients.keys()));
         
-        // Важно: закрываем соединение полностью
-        client.removeAllListeners();
-        client.disconnect(true);
+        // Отправляем событие через broadcast, чтобы не отправлять отключающемуся клиенту
+        this.logger.log('Broadcasting offline status');
+        this.io.sockets.except(client.id).emit('users:update', { 
+          userId: clientInfo.userId, 
+          isOnline: false 
+        });
+        this.logger.log('Status broadcasted');
+      } else {
+        this.logger.warn('Client info not found for disconnecting client');
       }
       
       this.logger.log(`Client disconnected: ${client.id}`);
@@ -215,7 +226,16 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   }
 
   private broadcastUserStatus(userId: string, isOnline: boolean) {
-    this.io.emit('users:update', { userId, isOnline });
+    this.logger.log(`=== Broadcasting user status ===`);
+    this.logger.log(`User ID: ${userId}, online: ${isOnline}`);
+    this.logger.log('Connected sockets:', this.io.sockets.sockets.size);
+    
+    const data = { userId, isOnline };
+    this.logger.log('Emitting data:', data);
+    
+    // Отправляем всем подключенным клиентам
+    this.io.sockets.emit('users:update', data);
+    this.logger.log('Status broadcasted');
   }
 
   @SubscribeMessage('chat:get')

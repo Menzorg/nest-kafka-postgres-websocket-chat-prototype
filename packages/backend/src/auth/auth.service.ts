@@ -41,14 +41,26 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto): Promise<AuthResponse> {
+    this.logger.log('=== Login attempt ===');
+    this.logger.log('Email:', loginDto.email);
+    
     const user = await this.userService.findByEmail(loginDto.email);
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.error('User not found');
+      throw new UnauthorizedException('Неверный email или пароль');
     }
+    this.logger.log('User found with ID:', user.id);
 
+    this.logger.log('Comparing passwords...');
+    this.logger.log('Input password:', loginDto.password);
+    this.logger.log('Stored password:', user.password);
+    
     const isPasswordValid = await bcrypt.compare(loginDto.password, user.password);
+    this.logger.log('Password valid:', isPasswordValid);
+    
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      this.logger.error('Invalid password');
+      throw new UnauthorizedException('Неверный email или пароль');
     }
 
     const payload = { sub: user.id, email: user.email };
@@ -57,16 +69,16 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
-        username: user.name,
+        name: user.name,
       },
     };
   }
 
   async register(registerDto: RegisterDto): Promise<AuthResponse> {
-    const hashedPassword = await bcrypt.hash(registerDto.password, 10);
     const user = await this.userService.create({
-      ...registerDto,
-      password: hashedPassword,
+      email: registerDto.email,
+      password: registerDto.password,
+      name: registerDto.name,
     });
 
     const payload = { sub: user.id, email: user.email };
@@ -75,7 +87,7 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
-        username: user.name,
+        name: user.name,
       },
     };
   }

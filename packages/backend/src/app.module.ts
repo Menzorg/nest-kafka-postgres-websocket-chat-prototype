@@ -29,6 +29,10 @@ import { KafkaAdapter } from './adapters/kafka/kafka.adapter';
         entities: [User, Chat, Message],
         synchronize: true,
         logging: true,
+        ssl: false,
+        extra: {
+          trustServerCertificate: true
+        },
       }),
       inject: [ConfigService],
     }),
