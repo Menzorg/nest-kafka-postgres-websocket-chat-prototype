@@ -34,7 +34,8 @@ export class ChatService {
     // Проверяем существование чата
     const existingChat = await this.chatRepository
       .createQueryBuilder('chat')
-      .innerJoinAndSelect('chat.participants', 'participant')
+      .select('chat.id')
+      .innerJoin('chat.participants', 'participant')
       .where('participant.id IN (:...userIds)', { userIds: [userId1, userId2] })
       .groupBy('chat.id')
       .having('COUNT(DISTINCT participant.id) = 2')
@@ -52,12 +53,22 @@ export class ChatService {
 
     const savedChat = await this.chatRepository.save(chat);
 
+    // Загружаем чат со всеми связями
+    const fullChat = await this.chatRepository.findOne({
+      where: { id: savedChat.id },
+      relations: ['participants']
+    });
+
+    if (!fullChat) {
+      throw new Error('Failed to load created chat');
+    }
+
     return {
-      id: savedChat.id,
-      participants: savedChat.participants.map(p => p.id),
+      id: fullChat.id,
+      participants: fullChat.participants.map(p => p.id),
       messages: [],
-      createdAt: savedChat.createdAt,
-      updatedAt: savedChat.updatedAt
+      createdAt: fullChat.createdAt,
+      updatedAt: fullChat.updatedAt
     };
   }
 
@@ -115,8 +126,8 @@ export class ChatService {
   }
 
   async findChatByParticipants(userId1: string, userId2: string): Promise<Chat | undefined> {
-    // Сначала находим ID чата, в котором участвуют оба пользователя
-    const chatQuery = await this.chatRepository
+    // Сначала находим ID чата
+    const chatId = await this.chatRepository
       .createQueryBuilder('chat')
       .select('chat.id')
       .innerJoin('chat.participants', 'participant')
@@ -125,15 +136,34 @@ export class ChatService {
       .having('COUNT(DISTINCT participant.id) = 2')
       .getOne();
 
-    if (!chatQuery) {
+    if (!chatId) {
       return undefined;
     }
 
-    // Затем загружаем полные данные чата
-    const chat = await this.chatRepository.findOne({
-      where: { id: chatQuery.id },
-      relations: ['participants', 'messages'],
-    });
+    // Затем загружаем полные данные чата с правильной группировкой
+    const chat = await this.chatRepository
+      .createQueryBuilder('chat')
+      .select([
+        'chat.id',
+        'chat.createdAt',
+        'chat.updatedAt',
+        'participant.id',
+        'participant.email',
+        'participant.name',
+        'participant.isOnline',
+        'participant.createdAt',
+        'message.id',
+        'message.chatId',
+        'message.senderId',
+        'message.content',
+        'message.status',
+        'message.createdAt'
+      ])
+      .innerJoin('chat.participants', 'participant')
+      .leftJoin('chat.messages', 'message')
+      .where('chat.id = :chatId', { chatId: chatId.id })
+      .groupBy('chat.id, chat.createdAt, chat.updatedAt, participant.id, participant.email, participant.name, participant.isOnline, participant.createdAt, message.id, message.chatId, message.senderId, message.content, message.status, message.createdAt')
+      .getOne();
 
     if (!chat) {
       return undefined;
@@ -142,20 +172,27 @@ export class ChatService {
     return {
       id: chat.id,
       participants: chat.participants.map(p => p.id),
-      messages: chat.messages.map(m => ({
+      messages: chat.messages?.map(m => ({
         id: m.id,
         chatId: m.chatId,
         senderId: m.senderId,
         content: m.content,
         status: m.status,
         createdAt: m.createdAt,
-      })),
+      })) || [],
       createdAt: chat.createdAt,
       updatedAt: chat.updatedAt,
     };
   }
 
   async saveMessage(messageDto: ChatMessage): Promise<ChatMessage> {
+    console.log('=== Saving Message ===', {
+      id: messageDto.id,
+      chatId: messageDto.chatId,
+      senderId: messageDto.senderId,
+      status: messageDto.status
+    });
+
     const chat = await this.chatRepository.findOneBy({ id: messageDto.chatId });
     if (!chat) {
       throw new NotFoundException('Chat not found');
@@ -166,17 +203,23 @@ export class ChatService {
       throw new NotFoundException('Sender not found');
     }
 
-    // Используем переданный ID сообщения
+    // Используем переданный ID и статус сообщения
     const message = this.messageRepository.create({
       id: messageDto.id,
       chatId: messageDto.chatId,
       senderId: messageDto.senderId,
       content: messageDto.content,
-      status: MessageDeliveryStatus.SENT,
+      status: messageDto.status,
       createdAt: messageDto.createdAt || new Date(),
     });
 
     const savedMessage = await this.messageRepository.save(message);
+    console.log('=== Message Saved ===', {
+      id: savedMessage.id,
+      chatId: savedMessage.chatId,
+      senderId: savedMessage.senderId,
+      status: savedMessage.status
+    });
 
     return {
       id: savedMessage.id,

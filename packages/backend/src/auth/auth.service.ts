@@ -75,21 +75,36 @@ export class AuthService {
   }
 
   async register(registerDto: RegisterDto): Promise<AuthResponse> {
-    const user = await this.userService.create({
-      email: registerDto.email,
-      password: registerDto.password,
-      name: registerDto.name,
-    });
+    this.logger.log('=== Starting registration process ===');
+    this.logger.log('Registration data:', { email: registerDto.email, name: registerDto.name });
+    
+    try {
+      const user = await this.userService.create({
+        email: registerDto.email,
+        password: registerDto.password,
+        name: registerDto.name,
+      });
 
-    const payload = { sub: user.id, email: user.email };
-    return {
-      accessToken: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-      },
-    };
+      this.logger.log('User created successfully, generating token');
+      const payload = { sub: user.id, email: user.email };
+      this.logger.log('Token payload:', payload);
+
+      const token = this.jwtService.sign(payload);
+      this.logger.log('Token generated successfully');
+
+      return {
+        accessToken: token,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+        },
+      };
+    } catch (error) {
+      this.logger.error('Registration error:', error.message);
+      this.logger.error('Stack:', error.stack);
+      throw error;
+    }
   }
 
   async getAllUsers() {
@@ -104,5 +119,13 @@ export class AuthService {
       this.logger.error('Error getting all users:', error.message);
       throw error;
     }
+  }
+
+  async updateUserStatus(userId: string, isOnline: boolean) {
+    this.logger.log('=== Updating user status ===');
+    this.logger.log('User ID:', userId);
+    this.logger.log('Is online:', isOnline);
+    
+    return this.userService.updateUserStatus(userId, isOnline);
   }
 }

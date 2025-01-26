@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { RegisterDto } from '@webchat/common';
 import { User } from './entities/user.entity';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface UserStatus {
   userId: string;
@@ -21,10 +22,8 @@ export class UserService {
   ) {}
 
   async create(dto: RegisterDto & { password: string }) {
-    this.logger.log('=== Creating new user ===');
-    this.logger.log('Email:', dto.email);
-    this.logger.log('Name:', dto.name);
-    
+    this.logger.log('Creating new user:', { email: dto.email, name: dto.name });
+
     const existingUser = await this.findByEmail(dto.email);
     if (existingUser) {
       this.logger.error('User with this email already exists');
@@ -37,10 +36,15 @@ export class UserService {
       name: dto.name,
     });
 
-    await this.userRepository.save(user);
-    this.updateUserStatus(user.id, true);
-    this.logger.log('User created successfully:', user.id);
-    return user;
+    try {
+      const savedUser = await this.userRepository.save(user);
+      this.logger.log('User created successfully with ID:', savedUser.id);
+      this.updateUserStatus(savedUser.id, true);
+      return savedUser;
+    } catch (error) {
+      this.logger.error('Error saving user:', error.message);
+      throw error;
+    }
   }
 
   async findByEmail(email: string) {

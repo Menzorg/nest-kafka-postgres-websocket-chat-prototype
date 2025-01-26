@@ -227,53 +227,69 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   }
 
   handleDisconnect(client: Socket) {
-    try {
-      this.logger.log('=== Handling disconnect ===');
-      this.logger.log('Client ID:', client.id);
-      this.logger.log('Connected:', client.connected);
-      this.logger.log('Disconnected:', client.disconnected);
-      this.logger.log('Handshake:', client.handshake);
-      this.logger.log('Rooms:', Array.from(client.rooms));
-      this.logger.log('Connected clients before:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
-        socketId: id,
-        userId: client.userId,
-        connected: client.socket.connected
-      })));
-      
-      const clientInfo = this.connectedClients.get(client.id);
-      if (clientInfo) {
-        this.logger.log('Client info found:', { 
-          userId: clientInfo.userId,
-          connected: clientInfo.socket.connected,
-          rooms: Array.from(clientInfo.socket.rooms)
-        });
-        
-        // Сначала удаляем клиента из списка
-        this.connectedClients.delete(client.id);
-        this.logger.log('Client removed from connected clients');
-        
-        // Отправляем событие через broadcast
-        this.logger.log('Broadcasting offline status');
-        this.io.sockets.except(client.id).emit('users:update', { 
-          userId: clientInfo.userId, 
-          isOnline: false 
-        });
-        this.logger.log('Status broadcasted');
-      } else {
-        this.logger.warn('Client info not found for disconnecting client');
+    this.logger.log('=== Client disconnecting ===', {
+      socketId: client.id,
+      userId: client.data?.user?.id,
+      rooms: Array.from(client.rooms),
+      connected: client.connected,
+      disconnected: client.disconnected
+    });
+
+    // Получаем информацию о клиенте до удаления
+    const clientInfo = this.connectedClients.get(client.id);
+    if (clientInfo) {
+      this.logger.log('=== Found client info ===', {
+        socketId: client.id,
+        userId: clientInfo.userId,
+        lastActivity: clientInfo.lastActivity,
+        otherSockets: Array.from(this.connectedClients.entries())
+          .filter(([socketId]) => socketId !== client.id)
+          .filter(([_, client]) => client.userId === clientInfo.userId)
+          .map(([socketId]) => socketId)
+      });
+
+      // Проверяем комнаты перед отключением
+      const rooms = this.io.sockets.adapter.rooms;
+      this.logger.log('=== Rooms before disconnect ===', {
+        allRooms: Array.from(rooms.keys()).map(roomName => ({
+          name: roomName,
+          members: Array.from(rooms.get(roomName) || [])
+        }))
+      });
+
+      // Удаляем клиента из списка подключенных
+      this.connectedClients.delete(client.id);
+
+      // Проверяем, есть ли еще активные соединения у пользователя
+      const hasOtherConnections = Array.from(this.connectedClients.values())
+        .some(client => client.userId === clientInfo.userId);
+
+      this.logger.log('=== User connection status ===', {
+        userId: clientInfo.userId,
+        hasOtherConnections,
+        remainingConnections: Array.from(this.connectedClients.entries())
+          .filter(([_, client]) => client.userId === clientInfo.userId)
+          .map(([id]) => id)
+      });
+
+      // Если это было последнее соединение пользователя, оповещаем других
+      if (!hasOtherConnections) {
+        this.broadcastUserStatus(clientInfo.userId, false);
       }
 
-      this.logger.log('Connected clients after:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
-        socketId: id,
-        userId: client.userId,
-        connected: client.socket.connected
-      })));
-      
-      this.logger.log(`Client disconnected: ${client.id}`);
-    } catch (error) {
-      this.logger.error('Error in handleDisconnect:');
-      this.logger.error(error);
+      // Проверяем комнаты после отключения
+      this.logger.log('=== Rooms after disconnect ===', {
+        allRooms: Array.from(rooms.keys()).map(roomName => ({
+          name: roomName,
+          members: Array.from(rooms.get(roomName) || [])
+        }))
+      });
     }
+
+    this.logger.log('=== Client disconnected ===', {
+      totalConnections: this.connectedClients.size,
+      remainingClients: Array.from(this.connectedClients.keys())
+    });
   }
 
   private broadcastUserStatus(userId: string, isOnline: boolean) {
@@ -284,98 +300,143 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     const data = { userId, isOnline };
     this.logger.log('Emitting data:', data);
     
-    // Отправляем всем подключенным клиентам, кроме отключающегося
-    const disconnectingClientId = Array.from(this.connectedClients.entries())
-      .find(([_, client]) => client.userId === userId)?.[0];
-
-    if (disconnectingClientId && !isOnline) {
-      this.io.sockets.except(disconnectingClientId).emit('users:update', data);
-    } else {
-      this.io.sockets.emit('users:update', data);
-    }
+    // Отправляем всем подключенным клиентам
+    this.io.emit('users:update', data);
     
     this.logger.log('Status broadcasted');
   }
 
+  private isUserInActiveChat(userId: string, chatId: string): boolean {
+    this.logger.log('=== Checking if user is in active chat ===', {
+      userId,
+      chatId
+    });
+
+    const roomName = `chat:${chatId}`;
+    const room = this.io.sockets.adapter.rooms.get(roomName);
+    
+    this.logger.log('Room state:', {
+      exists: !!room,
+      members: room ? Array.from(room) : [],
+      roomName
+    });
+
+    if (!room) {
+      this.logger.log('Room does not exist, user is not in chat');
+      return false;
+    }
+
+    // Находим все сокеты пользователя
+    const userSockets = Array.from(this.connectedClients.entries())
+      .filter(([_, client]) => client.userId === userId)
+      .map(([socketId]) => socketId);
+
+    this.logger.log('User sockets:', {
+      userId,
+      socketIds: userSockets,
+      connectedClients: Array.from(this.connectedClients.entries()).map(([id, client]) => ({
+        socketId: id,
+        userId: client.userId,
+        connected: client.socket.connected
+      }))
+    });
+
+    // Проверяем, есть ли хотя бы один сокет пользователя в комнате
+    const isInChat = userSockets.some(socketId => room.has(socketId));
+    
+    this.logger.log('Check result:', {
+      userId,
+      chatId,
+      isInChat,
+      userSocketsInRoom: userSockets.filter(socketId => room.has(socketId))
+    });
+
+    return isInChat;
+  }
+
   @SubscribeMessage('message')
   async handleMessage(client: Socket, payload: { chatId: string; content: string }) {
+    const requestId = uuidv4();
     const userId = client.data?.user?.id;
     if (!userId) {
       this.logger.error('=== Message handling failed: No user ID ===');
       return;
     }
 
-    try {
-      const requestId = uuidv4(); // Уникальный ID для каждого запроса
-      this.logger.log(`=== Starting message handling (Request ID: ${requestId}) ===`);
-      this.logger.log('Client:', { 
-        id: client.id, 
-        userId: client.data?.user?.id,
-        connected: client.connected,
-        disconnected: client.disconnected,
-        rooms: Array.from(client.rooms)
-      });
-      this.logger.log('Payload:', payload);
+    this.logger.log(`=== Starting message handling (Request ID: ${requestId}) ===`);
+    this.logger.log('Client:', {
+      id: client.id,
+      userId,
+      connected: client.connected,
+      disconnected: client.disconnected,
+      rooms: Array.from(client.rooms)
+    });
+    this.logger.log('Payload:', payload);
 
-      // Проверяем существование чата
-      this.logger.log(`[${requestId}] Getting chat for user ${userId}`);
-      const chat = await this.chatService.getChat(payload.chatId);
+    // Получаем чат и проверяем права
+    this.logger.log(`[${requestId}] Getting chat for user ${userId}`);
+    const chat = await this.chatService.getChat(payload.chatId);
 
-      if (!chat) {
-        this.logger.error(`[${requestId}] Chat ${payload.chatId} not found`);
-        throw new Error('Chat not found');
-      }
+    // Проверяем статус получателя
+    const recipientId = chat.participants.find(id => id !== userId);
+    this.logger.log(`[${requestId}] Checking active chats:`, {
+      senderId: userId,
+      recipientId,
+      chatId: payload.chatId
+    });
 
-      if (!chat.participants.includes(userId)) {
-        this.logger.error(`[${requestId}] User ${userId} is not a participant of chat ${payload.chatId}`);
-        throw new Error('User is not a participant of this chat');
-      }
+    // Проверяем состояние комнаты
+    const roomName = `chat:${payload.chatId}`;
+    const room = this.io.sockets.adapter.rooms.get(roomName);
+    this.logger.log(`[${requestId}] Room state when sending message:`, {
+      roomName,
+      exists: !!room,
+      members: room ? Array.from(room) : []
+    });
 
-      // Генерируем ID для сообщения и временную метку
-      const messageId = uuidv4();
-      const timestamp = new Date();
+    // Проверяем все сокеты получателя
+    const recipientSockets = Array.from(this.connectedClients.entries())
+      .filter(([_, client]) => client.userId === recipientId)
+      .map(([socketId]) => ({
+        socketId,
+        inRoom: room?.has(socketId) || false
+      }));
 
-      this.logger.log(`[${requestId}] Saving message`);
-      const message = await this.chatService.saveMessage({
-        id: messageId,
-        chatId: payload.chatId,
-        senderId: userId,
-        content: payload.content,
-        status: MessageDeliveryStatus.SENT,
-        createdAt: timestamp
-      });
+    this.logger.log(`[${requestId}] Recipient sockets:`, {
+      recipientId,
+      sockets: recipientSockets,
+      totalSockets: recipientSockets.length
+    });
 
-      this.logger.log(`[${requestId}] Message saved:`, message);
-      this.logger.log(`[${requestId}] Emitting to room:`, `chat:${payload.chatId}`);
-      this.logger.log(`[${requestId}] Room members:`, Array.from(this.io.sockets.adapter.rooms.get(`chat:${payload.chatId}`) || []));
+    const isRecipientInChat = recipientSockets.some(socket => socket.inRoom);
+    this.logger.log(`[${requestId}] Recipient ${recipientId} in chat: ${isRecipientInChat}`);
 
-      // Отправляем сообщение всем участникам чата
-      this.io.to(`chat:${payload.chatId}`).emit('message', message);
-      
-      // Отправляем подтверждение отправителю
-      client.emit('message:ack', { messageId: message.id });
+    // Определяем начальный статус сообщения
+    const initialStatus = isRecipientInChat ? MessageDeliveryStatus.DELIVERED : MessageDeliveryStatus.SENT;
+    this.logger.log(`[${requestId}] Initial message status: ${initialStatus}`);
 
-      this.logger.log(`[${requestId}] Message emitted to room and ACK sent`);
-      this.logger.log(`=== Finished message handling (Request ID: ${requestId}) ===`);
+    // Сохраняем сообщение
+    const message = await this.chatService.saveMessage({
+      id: uuidv4(),
+      chatId: payload.chatId,
+      senderId: userId,
+      content: payload.content,
+      status: initialStatus,
+      createdAt: new Date()
+    });
 
-      return {
-        status: 'ok',
-        id: message.id,
-        data: message,
-      };
-    } catch (error) {
-      this.logger.error('Error in handleMessage:', error);
-      // Отправляем ошибку клиенту
-      client.emit('message:error', {
-        messageId: uuidv4(),
-        error: error.message,
-      });
+    this.logger.log(`[${requestId}] Message saved:`, {
+      id: message.id,
+      senderId: message.senderId,
+      status: message.status
+    });
 
-      return {
-        status: 'error',
-        error: error.message,
-      };
-    }
+    // Отправляем сообщение в комнату чата
+    this.io.to(roomName).emit('message', message);
+    this.logger.log(`[${requestId}] Message broadcasted to chat room: ${roomName}`);
+
+    this.logger.log(`=== Finished message handling (Request ID: ${requestId}) ===`);
+    return message;
   }
 
   @SubscribeMessage('chat:get')
@@ -390,11 +451,6 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         rooms: Array.from(client.rooms)
       });
       this.logger.log('Payload:', payload);
-      this.logger.log('Connected clients:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
-        socketId: id,
-        userId: client.userId,
-        connected: client.socket.connected
-      })));
 
       const userId = client.data.user.id;
       let chat = await this.chatService.findChatByParticipants(userId, payload.recipientId);
@@ -446,61 +502,159 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   @SubscribeMessage('chat:join')
   async handleChatJoin(client: Socket, payload: { chatId: string }) {
     try {
-      this.logger.log('=== Handling chat:join ===');
+      const userId = client.data?.user?.id;
+      if (!userId) {
+        this.logger.error('=== Chat join failed: No user ID ===');
+        return;
+      }
+
+      const requestId = uuidv4();
+      this.logger.log(`=== Starting chat join (Request ID: ${requestId}) ===`);
       this.logger.log('Client:', { 
         id: client.id, 
-        userId: client.data?.user?.id,
+        userId,
         connected: client.connected,
         disconnected: client.disconnected,
         rooms: Array.from(client.rooms)
       });
       this.logger.log('Payload:', payload);
-      this.logger.log('Connected clients:', Array.from(this.connectedClients.entries()).map(([id, client]) => ({
-        socketId: id,
-        userId: client.userId,
-        connected: client.socket.connected
-      })));
 
-      const userId = client.data.user.id;
+      // Проверяем существование чата
+      this.logger.log(`[${requestId}] Getting chat for user ${userId}`);
       const chat = await this.chatService.getChat(payload.chatId);
 
       if (!chat) {
-        this.logger.error(`Chat ${payload.chatId} not found`);
-        return { status: 'error', message: 'Chat not found' };
+        this.logger.error(`[${requestId}] Chat ${payload.chatId} not found`);
+        throw new Error('Chat not found');
       }
 
       if (!chat.participants.includes(userId)) {
-        this.logger.error(`User ${userId} is not a participant of chat ${payload.chatId}`);
-        return { status: 'error', message: 'User is not a participant of this chat' };
+        this.logger.error(`[${requestId}] User ${userId} is not a participant of chat ${payload.chatId}`);
+        throw new Error('User is not a participant of this chat');
       }
 
-      // Присоединяем клиента к комнате чата
-      await client.join(`chat:${payload.chatId}`);
-      this.logger.log(`User ${userId} joined chat ${payload.chatId}`);
-      this.logger.log('Updated client rooms:', Array.from(client.rooms));
-      this.logger.log('Room members:', Array.from(this.io.sockets.adapter.rooms.get(`chat:${payload.chatId}`) || []));
+      // Присоединяемся к комнате чата
+      const roomName = `chat:${payload.chatId}`;
+      this.logger.log(`[${requestId}] Joining room ${roomName}`);
+      await client.join(roomName);
+
+      this.logger.log(`[${requestId}] Room members after join:`, 
+        Array.from(this.io.sockets.adapter.rooms.get(roomName) || []));
 
       // Получаем непрочитанные сообщения
+      this.logger.log(`[${requestId}] Getting undelivered messages for user ${userId} in chat ${payload.chatId}`);
       const undeliveredMessages = await this.chatService.getUndeliveredMessages(userId, payload.chatId);
+      this.logger.log(`[${requestId}] Found ${undeliveredMessages.length} undelivered messages:`, 
+        undeliveredMessages.map(m => ({
+          id: m.id,
+          senderId: m.senderId,
+          status: m.status,
+          content: m.content.substring(0, 20) + (m.content.length > 20 ? '...' : '')
+        }))
+      );
       
       // Обновляем статус сообщений на DELIVERED
       for (const message of undeliveredMessages) {
+        this.logger.log(`[${requestId}] Processing message ${message.id}:`);
+        this.logger.log(`[${requestId}] - Current status: ${message.status}`);
+        this.logger.log(`[${requestId}] - Sender: ${message.senderId}`);
+        
         await this.chatService.updateMessageStatus(message.id, MessageDeliveryStatus.DELIVERED);
+        this.logger.log(`[${requestId}] - Status updated to DELIVERED`);
+        
+        // Находим сокеты отправителя
+        const senderSockets = Array.from(this.connectedClients.entries())
+          .filter(([_, client]) => client.userId === message.senderId)
+          .map(([socketId]) => socketId);
+        
+        this.logger.log(`[${requestId}] - Sender sockets:`, senderSockets);
         
         // Уведомляем отправителя об обновлении статуса
-        this.io.to(`user:${message.senderId}`).emit('message:status', {
-          messageId: message.id,
-          status: MessageDeliveryStatus.DELIVERED,
-          timestamp: new Date().toISOString()
-        });
+        for (const socketId of senderSockets) {
+          this.io.to(socketId).emit('message:status', {
+            messageId: message.id,
+            status: MessageDeliveryStatus.DELIVERED
+          });
+        }
       }
 
-      this.logger.log(`Updated status for ${undeliveredMessages.length} messages`);
-      return { status: 'ok' };
+      this.logger.log(`=== Finished chat join (Request ID: ${requestId}) ===`);
+
+      return {
+        status: 'ok',
+        message: 'Joined chat room successfully'
+      };
     } catch (error) {
       this.logger.error('Error in handleChatJoin:', error);
-      return { status: 'error', message: error.message };
+      throw error;
     }
+  }
+
+  @SubscribeMessage('chat:leave')
+  async handleChatLeave(client: Socket, payload: { chatId: string }): Promise<{ success: boolean }> {
+    const requestId = uuidv4();
+    const userId = client.data?.user?.id;
+    if (!userId) {
+      this.logger.error('=== Chat leave failed: No user ID ===');
+      return { success: false };
+    }
+
+    this.logger.log(`=== Starting chat leave (Request ID: ${requestId}) ===`);
+    this.logger.log('Client:', {
+      id: client.id,
+      userId,
+      connected: client.connected,
+      disconnected: client.disconnected,
+      rooms: Array.from(client.rooms)
+    });
+    this.logger.log('Payload:', payload);
+
+    const roomName = `chat:${payload.chatId}`;
+    
+    // Проверяем состояние комнаты до выхода
+    const roomBefore = this.io.sockets.adapter.rooms.get(roomName);
+    this.logger.log(`[${requestId}] Room state before leave:`, {
+      roomName,
+      exists: !!roomBefore,
+      members: roomBefore ? Array.from(roomBefore) : []
+    });
+
+    try {
+      // Покидаем комнату
+      await client.leave(roomName);
+
+      // Проверяем все сокеты этого пользователя
+      const userSockets = Array.from(this.connectedClients.entries())
+        .filter(([_, socket]) => socket.userId === userId)
+        .map(([socketId]) => this.io.sockets.sockets.get(socketId))
+        .filter((socket): socket is Socket => socket !== undefined);
+
+      this.logger.log(`[${requestId}] User sockets:`, {
+        userId,
+        total: userSockets.length,
+        socketIds: userSockets.map(socket => socket.id)
+      });
+
+      // Отключаем все сокеты пользователя от этой комнаты
+      for (const socket of userSockets) {
+        await socket.leave(roomName);
+        this.logger.log(`[${requestId}] Socket ${socket.id} left room ${roomName}`);
+      }
+    } catch (error) {
+      this.logger.error(`[${requestId}] Error during room leave:`, error);
+      return { success: false };
+    }
+    
+    // Проверяем состояние комнаты после выхода
+    const roomAfter = this.io.sockets.adapter.rooms.get(roomName);
+    this.logger.log(`[${requestId}] Room state after leave:`, {
+      roomName,
+      exists: !!roomAfter,
+      members: roomAfter ? Array.from(roomAfter) : []
+    });
+
+    this.logger.log(`=== Finished chat leave (Request ID: ${requestId}) ===`);
+    return { success: true };
   }
 
   @SubscribeMessage('message:read')

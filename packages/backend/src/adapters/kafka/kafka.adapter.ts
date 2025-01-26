@@ -178,7 +178,7 @@ export class KafkaAdapter implements OnModuleInit, OnModuleDestroy {
         });
 
         this.consumer.on('consumer.heartbeat', () => {
-          this.logger.debug('Consumer heartbeat');
+          // this.logger.debug('Consumer heartbeat');
         });
       }
     } catch (error) {
