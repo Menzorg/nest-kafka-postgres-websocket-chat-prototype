@@ -378,7 +378,7 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     const chat = await this.chatService.getChat(payload.chatId);
 
     // Проверяем статус получателя
-    const recipientId = chat.participants.find(id => id !== userId);
+    const recipientId = chat.participants.find((id: string) => id !== userId);
     this.logger.log(`[${requestId}] Checking active chats:`, {
       senderId: userId,
       recipientId,
