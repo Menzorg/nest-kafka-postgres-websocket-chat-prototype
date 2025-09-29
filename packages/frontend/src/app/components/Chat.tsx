@@ -17,6 +17,9 @@ export default function Chat({ recipientId, recipientName, onClose }: ChatProps)
   const [chatId, setChatId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pinnedMessages, setPinnedMessages] = useState<ChatMessage[]>([]);
+  const [selectedMessage, setSelectedMessage] = useState<ChatMessage | null>(null);
+  const [showMessageMenu, setShowMessageMenu] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { socket, isConnected } = useSocket(useAuth().token);
   const { user } = useAuth();
@@ -94,6 +97,20 @@ export default function Chat({ recipientId, recipientName, onClose }: ChatProps)
 
     socket.on('message', handleMessage);
     socket.on('message:status', handleStatus);
+    socket.on('message:pinned', (message: ChatMessage) => {
+      console.log('=== Message pinned ===', message);
+      setMessages(prev => prev.map(msg =>
+        msg.id === message.id ? { ...msg, isPinned: true, pinnedAt: message.pinnedAt, pinnedBy: message.pinnedBy } : msg
+      ));
+      setPinnedMessages(prev => [...prev, message]);
+    });
+    socket.on('message:unpinned', (message: ChatMessage) => {
+      console.log('=== Message unpinned ===', message);
+      setMessages(prev => prev.map(msg =>
+        msg.id === message.id ? { ...msg, isPinned: false, pinnedAt: null, pinnedBy: null } : msg
+      ));
+      setPinnedMessages(prev => prev.filter(msg => msg.id !== message.id));
+    });
 
     // Инициализируем чат
     const initChat = async () => {
@@ -122,6 +139,13 @@ export default function Chat({ recipientId, recipientName, onClose }: ChatProps)
         
         setChatId(chatResponse.chatId);
         setMessages(chatResponse.messages);
+
+        // Get pinned messages
+        socket.emit('chat:get-pinned', { chatId: chatResponse.chatId }, (response: { status: string, messages?: ChatMessage[] }) => {
+          if (response.status === 'ok' && response.messages) {
+            setPinnedMessages(response.messages);
+          }
+        });
 
         // Присоединяемся к чату
         console.log('=== Joining chat room ===', {
@@ -175,6 +199,8 @@ export default function Chat({ recipientId, recipientName, onClose }: ChatProps)
       });
       socket?.off('message', handleMessage);
       socket?.off('message:status', handleStatus);
+      socket?.off('message:pinned');
+      socket?.off('message:unpinned');
 
       // Покидаем чат при размонтировании
       if (chatId && socket?.connected) {
@@ -225,16 +251,43 @@ export default function Chat({ recipientId, recipientName, onClose }: ChatProps)
         socketId: socket.id
       });
       socket.emit('message:read', { messageId: message.id });
-      
+
       // Обновляем статус сообщения локально
-      setMessages(prevMessages => 
-        prevMessages.map(msg => 
-          msg.id === message.id 
+      setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === message.id
             ? { ...msg, status: MessageDeliveryStatus.READ }
             : msg
         )
       );
     }
+  };
+
+  const handlePinMessage = (message: ChatMessage) => {
+    if (!socket) return;
+
+    if (message.isPinned) {
+      socket.emit('message:unpin', { messageId: message.id }, (response: { status: string }) => {
+        if (response.status === 'ok') {
+          console.log('Message unpinned');
+        }
+      });
+    } else {
+      socket.emit('message:pin', { messageId: message.id }, (response: { status: string }) => {
+        if (response.status === 'ok') {
+          console.log('Message pinned');
+        }
+      });
+    }
+    setShowMessageMenu(null);
+  };
+
+  const handleForwardMessage = (message: ChatMessage) => {
+    // For now, we'll just log this - in a real implementation,
+    // you'd show a dialog to select the target chat
+    console.log('Forward message:', message);
+    alert('Message forwarding UI coming soon! Select a chat to forward to.');
+    setShowMessageMenu(null);
   };
 
   const handleClose = () => {
@@ -331,43 +384,106 @@ export default function Chat({ recipientId, recipientName, onClose }: ChatProps)
           </button>
         </div>
 
+        {/* Pinned Messages Section */}
+        {pinnedMessages.length > 0 && (
+          <div className="border-b bg-yellow-50 p-3">
+            <div className="text-sm font-semibold text-gray-700 mb-2">📌 Pinned Messages ({pinnedMessages.length})</div>
+            <div className="space-y-2 max-h-32 overflow-y-auto">
+              {pinnedMessages.map((message) => (
+                <div key={message.id} className="bg-white p-2 rounded text-sm text-gray-700 border border-yellow-200">
+                  {message.content}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${message.senderId === user?.id ? 'justify-end' : 'justify-start'}`}
-              onClick={() => handleMessageClick(message)}
-              style={{ 
-                cursor: message.senderId !== user?.id && message.status !== MessageDeliveryStatus.READ 
-                  ? 'pointer' 
-                  : 'default' 
-              }}
+              className={`flex ${message.senderId === user?.id ? 'justify-end' : 'justify-start'} relative group`}
             >
-              <div
-                className={`rounded-lg px-4 py-2 max-w-sm transition-all duration-200 ${
-                  message.senderId === user?.id
-                    ? 'bg-blue-500 text-white'
-                    : message.status === MessageDeliveryStatus.READ
-                      ? 'bg-gray-100 text-gray-900'
-                      : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
-                }`}
-              >
-                <p>{message.content}</p>
-                <div className="flex justify-between items-center mt-1">
-                  <p className={`text-xs ${
-                    message.senderId === user?.id ? 'text-blue-100' : 'text-gray-500'
-                  }`}>
-                    {new Date(message.createdAt).toLocaleTimeString()}
-                  </p>
-                  {message.senderId === user?.id && (
-                    <span className={`text-xs ${
+              <div className="relative">
+                <div
+                  className={`rounded-lg px-4 py-2 max-w-sm transition-all duration-200 ${
+                    message.senderId === user?.id
+                      ? 'bg-blue-500 text-white'
+                      : message.status === MessageDeliveryStatus.READ
+                        ? 'bg-gray-100 text-gray-900'
+                        : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+                  }`}
+                  onClick={() => handleMessageClick(message)}
+                  style={{
+                    cursor: message.senderId !== user?.id && message.status !== MessageDeliveryStatus.READ
+                      ? 'pointer'
+                      : 'default'
+                  }}
+                >
+                  {/* Forwarded indicator */}
+                  {message.isForwarded && (
+                    <div className={`text-xs italic mb-1 ${
+                      message.senderId === user?.id ? 'text-blue-200' : 'text-gray-500'
+                    }`}>
+                      ↪ Forwarded message
+                    </div>
+                  )}
+
+                  {/* Pinned indicator */}
+                  {message.isPinned && (
+                    <div className={`text-xs mb-1 ${
+                      message.senderId === user?.id ? 'text-blue-200' : 'text-gray-500'
+                    }`}>
+                      📌 Pinned
+                    </div>
+                  )}
+
+                  <p>{message.content}</p>
+                  <div className="flex justify-between items-center mt-1">
+                    <p className={`text-xs ${
                       message.senderId === user?.id ? 'text-blue-100' : 'text-gray-500'
                     }`}>
-                      {message.status === MessageDeliveryStatus.SENT && '✓'}
-                      {message.status === MessageDeliveryStatus.DELIVERED && '✓✓'}
-                      {message.status === MessageDeliveryStatus.READ && '✓✓✓'}
-                    </span>
+                      {new Date(message.createdAt).toLocaleTimeString()}
+                    </p>
+                    {message.senderId === user?.id && (
+                      <span className={`text-xs ${
+                        message.senderId === user?.id ? 'text-blue-100' : 'text-gray-500'
+                      }`}>
+                        {message.status === MessageDeliveryStatus.SENT && '✓'}
+                        {message.status === MessageDeliveryStatus.DELIVERED && '✓✓'}
+                        {message.status === MessageDeliveryStatus.READ && '✓✓✓'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Message actions menu */}
+                <div className="absolute top-0 right-full mr-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => setShowMessageMenu(showMessageMenu === message.id ? null : message.id)}
+                    className="p-1 bg-white rounded shadow-md hover:bg-gray-100"
+                  >
+                    <svg className="w-4 h-4 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                    </svg>
+                  </button>
+
+                  {showMessageMenu === message.id && (
+                    <div className="absolute right-0 mt-1 w-40 bg-white rounded-md shadow-lg z-10">
+                      <button
+                        onClick={() => handlePinMessage(message)}
+                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      >
+                        {message.isPinned ? '📌 Unpin' : '📌 Pin Message'}
+                      </button>
+                      <button
+                        onClick={() => handleForwardMessage(message)}
+                        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      >
+                        ↪ Forward
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

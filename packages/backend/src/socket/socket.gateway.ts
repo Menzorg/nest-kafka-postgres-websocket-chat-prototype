@@ -667,8 +667,8 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   async handleMessageRead(client: Socket, payload: { messageId: string }) {
     try {
       this.logger.log('=== Handling message:read ===');
-      this.logger.log('Client:', { 
-        id: client.id, 
+      this.logger.log('Client:', {
+        id: client.id,
         userId: client.data?.user?.id,
         connected: client.connected,
         disconnected: client.disconnected,
@@ -702,24 +702,189 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
       // Обновляем статус сообщения
       await this.chatService.updateMessageStatus(payload.messageId, MessageDeliveryStatus.READ);
-      
+
       const statusUpdate = {
         messageId: payload.messageId,
         status: MessageDeliveryStatus.READ,
         timestamp: new Date().toISOString()
       };
-      
+
       this.logger.log('Emitting status update:', statusUpdate);
       this.logger.log('To room:', `user:${message.senderId}`);
-      
+
       // Уведомляем отправителя об обновлении статуса
       this.io.to(`user:${message.senderId}`).emit('message:status', statusUpdate);
-      
+
       this.logger.log('Status update emitted');
       this.logger.log(`Message ${payload.messageId} marked as read by user ${userId}`);
       return { status: 'ok' };
     } catch (error) {
       this.logger.error('Error in handleMessageRead:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('message:pin')
+  async handleMessagePin(client: Socket, payload: { messageId: string }) {
+    try {
+      this.logger.log('=== Handling message:pin ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const pinnedMessage = await this.chatService.pinMessage(payload.messageId, userId);
+
+      // Notify all chat participants
+      const chatRoom = `chat:${pinnedMessage.chatId}`;
+      this.io.to(chatRoom).emit('message:pinned', pinnedMessage);
+
+      this.logger.log(`Message ${payload.messageId} pinned by user ${userId}`);
+      return { status: 'ok', message: pinnedMessage };
+    } catch (error) {
+      this.logger.error('Error in handleMessagePin:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('message:unpin')
+  async handleMessageUnpin(client: Socket, payload: { messageId: string }) {
+    try {
+      this.logger.log('=== Handling message:unpin ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const unpinnedMessage = await this.chatService.unpinMessage(payload.messageId, userId);
+
+      // Notify all chat participants
+      const chatRoom = `chat:${unpinnedMessage.chatId}`;
+      this.io.to(chatRoom).emit('message:unpinned', unpinnedMessage);
+
+      this.logger.log(`Message ${payload.messageId} unpinned by user ${userId}`);
+      return { status: 'ok', message: unpinnedMessage };
+    } catch (error) {
+      this.logger.error('Error in handleMessageUnpin:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('chat:get-pinned')
+  async handleGetPinnedMessages(client: Socket, payload: { chatId: string }) {
+    try {
+      this.logger.log('=== Handling chat:get-pinned ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+
+      // Verify user is participant
+      const chat = await this.chatService.getChat(payload.chatId);
+      if (!chat.participants.includes(userId)) {
+        this.logger.error(`User ${userId} is not a participant of chat ${payload.chatId}`);
+        return { status: 'error', message: 'User is not a participant of this chat' };
+      }
+
+      const pinnedMessages = await this.chatService.getPinnedMessages(payload.chatId);
+
+      this.logger.log(`Retrieved ${pinnedMessages.length} pinned messages for chat ${payload.chatId}`);
+      return { status: 'ok', messages: pinnedMessages };
+    } catch (error) {
+      this.logger.error('Error in handleGetPinnedMessages:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('message:forward')
+  async handleMessageForward(client: Socket, payload: {
+    messageId: string;
+    toChatId: string;
+    additionalContent?: string;
+  }) {
+    try {
+      this.logger.log('=== Handling message:forward ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const forwardedMessage = await this.chatService.forwardMessage(
+        payload.messageId,
+        payload.toChatId,
+        userId,
+        payload.additionalContent
+      );
+
+      // Notify the target chat room about the new forwarded message
+      const targetChatRoom = `chat:${payload.toChatId}`;
+      this.io.to(targetChatRoom).emit('message', forwardedMessage);
+
+      this.logger.log(`Message ${payload.messageId} forwarded to chat ${payload.toChatId} by user ${userId}`);
+      return { status: 'ok', message: forwardedMessage };
+    } catch (error) {
+      this.logger.error('Error in handleMessageForward:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('message:forward-multiple')
+  async handleMultipleMessageForward(client: Socket, payload: {
+    messageIds: string[];
+    toChatId: string;
+  }) {
+    try {
+      this.logger.log('=== Handling message:forward-multiple ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', {
+        messageCount: payload.messageIds.length,
+        toChatId: payload.toChatId,
+      });
+
+      const userId = client.data.user.id;
+      const forwardedMessages = await this.chatService.forwardMultipleMessages(
+        payload.messageIds,
+        payload.toChatId,
+        userId
+      );
+
+      // Notify the target chat room about all forwarded messages
+      const targetChatRoom = `chat:${payload.toChatId}`;
+      forwardedMessages.forEach(message => {
+        this.io.to(targetChatRoom).emit('message', message);
+      });
+
+      this.logger.log(`${forwardedMessages.length} messages forwarded to chat ${payload.toChatId} by user ${userId}`);
+      return { status: 'ok', messages: forwardedMessages };
+    } catch (error) {
+      this.logger.error('Error in handleMultipleMessageForward:', error);
       return { status: 'error', message: error.message };
     }
   }
