@@ -1,4 +1,4 @@
-import { Entity, PrimaryColumn, ManyToMany, OneToMany, CreateDateColumn, UpdateDateColumn, JoinTable } from 'typeorm';
+import { Entity, PrimaryColumn, ManyToMany, OneToMany, CreateDateColumn, UpdateDateColumn, JoinTable, Column } from 'typeorm';
 import { User } from '../../user/entities/user.entity';
 import { Message } from './message.entity';
 
@@ -29,4 +29,7 @@ export class Chat {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column({ type: 'int', default: 10 })
+  maxPinnedMessages: number;
 }
