@@ -7,6 +7,7 @@ export interface Chat {
   messages: ChatMessage[];
   createdAt: Date;
   updatedAt: Date;
+  maxPinnedMessages?: number;
 }
 
 export interface ChatMessage {
@@ -26,4 +27,15 @@ export interface ChatMessage {
   isForwarded?: boolean;
   forwardedFromId?: string | null;
   originalSenderId?: string | null;
+
+  // Edit fields
+  isEdited?: boolean;
+  editedAt?: Date | null;
+  originalContent?: string | null;
+
+  // Delete fields
+  isDeleted?: boolean;
+  isDeletedForEveryone?: boolean;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
 }

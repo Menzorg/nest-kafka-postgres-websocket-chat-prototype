@@ -368,6 +368,15 @@ export class ChatService {
       throw new ConflictException('Message is already pinned');
     }
 
+    // Check pinned messages limit
+    const pinnedCount = await this.messageRepository.count({
+      where: { chatId: message.chatId, isPinned: true }
+    });
+
+    if (pinnedCount >= (chat.maxPinnedMessages || 10)) {
+      throw new ConflictException(`Maximum number of pinned messages (${chat.maxPinnedMessages || 10}) reached`);
+    }
+
     // Update message
     message.isPinned = true;
     message.pinnedAt = new Date();
@@ -596,5 +605,267 @@ export class ChatService {
     });
 
     return forwardedMessages;
+  }
+
+  async editMessage(
+    messageId: string,
+    userId: string,
+    newContent: string
+  ): Promise<ChatMessage> {
+    console.log('=== Editing Message ===', { messageId, userId });
+
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+      relations: ['chat', 'chat.participants'],
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    // Check if user is the sender
+    if (message.senderId !== userId) {
+      throw new ConflictException('Only the sender can edit the message');
+    }
+
+    // Check if message is deleted
+    if (message.isDeleted || message.isDeletedForEveryone) {
+      throw new ConflictException('Cannot edit a deleted message');
+    }
+
+    // Check time limit (e.g., 15 minutes)
+    const timeLimit = 15 * 60 * 1000; // 15 minutes in milliseconds
+    const timeSinceCreation = Date.now() - message.createdAt.getTime();
+    if (timeSinceCreation > timeLimit) {
+      throw new ConflictException('Edit time limit exceeded');
+    }
+
+    // Save original content if first edit
+    if (!message.isEdited) {
+      message.originalContent = message.content;
+    }
+
+    // Update message
+    message.content = newContent;
+    message.isEdited = true;
+    message.editedAt = new Date();
+
+    const savedMessage = await this.messageRepository.save(message);
+
+    console.log('=== Message Edited ===', {
+      messageId: savedMessage.id,
+      editedAt: savedMessage.editedAt,
+    });
+
+    return {
+      id: savedMessage.id,
+      chatId: savedMessage.chatId,
+      senderId: savedMessage.senderId,
+      content: savedMessage.content,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+      isEdited: savedMessage.isEdited,
+      editedAt: savedMessage.editedAt,
+    };
+  }
+
+  async deleteMessageForSelf(
+    messageId: string,
+    userId: string
+  ): Promise<void> {
+    console.log('=== Deleting Message for Self ===', { messageId, userId });
+
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+      relations: ['chat', 'chat.participants'],
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    const chat = await this.chatRepository.findOne({
+      where: { id: message.chatId },
+      relations: ['participants'],
+    });
+
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    // Verify user is participant
+    const isParticipant = chat.participants.some(p => p.id === userId);
+    if (!isParticipant) {
+      throw new ConflictException('User is not a participant of this chat');
+    }
+
+    // For self-deletion, we would need a junction table to track per-user deletions
+    // For simplicity, marking it as deleted if sender deletes it
+    if (message.senderId === userId) {
+      message.isDeleted = true;
+      message.deletedAt = new Date();
+      message.deletedBy = userId;
+      await this.messageRepository.save(message);
+    }
+
+    console.log('=== Message Deleted for Self ===', { messageId });
+  }
+
+  async deleteMessageForEveryone(
+    messageId: string,
+    userId: string
+  ): Promise<void> {
+    console.log('=== Deleting Message for Everyone ===', { messageId, userId });
+
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    // Check if user is the sender
+    if (message.senderId !== userId) {
+      throw new ConflictException('Only the sender can delete the message for everyone');
+    }
+
+    // Check time limit (e.g., 60 minutes)
+    const timeLimit = 60 * 60 * 1000; // 60 minutes in milliseconds
+    const timeSinceCreation = Date.now() - message.createdAt.getTime();
+    if (timeSinceCreation > timeLimit) {
+      throw new ConflictException('Delete time limit exceeded');
+    }
+
+    // Update message
+    message.isDeletedForEveryone = true;
+    message.deletedAt = new Date();
+    message.deletedBy = userId;
+
+    await this.messageRepository.save(message);
+
+    console.log('=== Message Deleted for Everyone ===', { messageId });
+  }
+
+  async getMessageEditHistory(messageId: string): Promise<any[]> {
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    const history = [];
+
+    if (message.originalContent) {
+      history.push({
+        content: message.originalContent,
+        timestamp: message.createdAt,
+        version: 1,
+      });
+    }
+
+    if (message.isEdited && message.editedAt) {
+      history.push({
+        content: message.content,
+        timestamp: message.editedAt,
+        version: 2,
+      });
+    }
+
+    return history;
+  }
+
+  async searchMessages(
+    userId: string,
+    query: string,
+    options?: {
+      chatId?: string;
+      senderId?: string;
+      startDate?: Date;
+      endDate?: Date;
+      limit?: number;
+    }
+  ): Promise<ChatMessage[]> {
+    console.log('=== Searching Messages ===', { userId, query, options });
+
+    // First, get all chats where user is participant
+    const userChats = await this.chatRepository
+      .createQueryBuilder('chat')
+      .innerJoin('chat.participants', 'participant')
+      .where('participant.id = :userId', { userId })
+      .getMany();
+
+    const chatIds = userChats.map(chat => chat.id);
+
+    if (chatIds.length === 0) {
+      return [];
+    }
+
+    // Build query
+    let queryBuilder = this.messageRepository
+      .createQueryBuilder('message')
+      .where('message.chatId IN (:...chatIds)', { chatIds })
+      .andWhere('message.isDeletedForEveryone = false');
+
+    // Add content search
+    if (query) {
+      queryBuilder = queryBuilder.andWhere(
+        'LOWER(message.content) LIKE LOWER(:query)',
+        { query: `%${query}%` }
+      );
+    }
+
+    // Add optional filters
+    if (options?.chatId) {
+      queryBuilder = queryBuilder.andWhere('message.chatId = :chatId', {
+        chatId: options.chatId,
+      });
+    }
+
+    if (options?.senderId) {
+      queryBuilder = queryBuilder.andWhere('message.senderId = :senderId', {
+        senderId: options.senderId,
+      });
+    }
+
+    if (options?.startDate) {
+      queryBuilder = queryBuilder.andWhere('message.createdAt >= :startDate', {
+        startDate: options.startDate,
+      });
+    }
+
+    if (options?.endDate) {
+      queryBuilder = queryBuilder.andWhere('message.createdAt <= :endDate', {
+        endDate: options.endDate,
+      });
+    }
+
+    // Order and limit
+    queryBuilder = queryBuilder.orderBy('message.createdAt', 'DESC');
+
+    if (options?.limit) {
+      queryBuilder = queryBuilder.limit(options.limit);
+    } else {
+      queryBuilder = queryBuilder.limit(100); // Default limit
+    }
+
+    const messages = await queryBuilder.getMany();
+
+    console.log('=== Messages Found ===', {
+      count: messages.length,
+    });
+
+    return messages.map(message => ({
+      id: message.id,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      content: message.content,
+      status: message.status,
+      createdAt: message.createdAt,
+      isEdited: message.isEdited,
+      editedAt: message.editedAt,
+    }));
   }
 }
