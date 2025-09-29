@@ -81,7 +81,8 @@ describe('ChatService', () => {
             save: jest.fn(),
             find: jest.fn(),
             create: jest.fn(),
-            createQueryBuilder: jest.fn()
+            createQueryBuilder: jest.fn(),
+            count: jest.fn()
           },
         },
         {
@@ -95,9 +96,11 @@ describe('ChatService', () => {
           provide: getRepositoryToken(Reaction),
           useValue: {
             find: jest.fn(),
+            findOne: jest.fn(),
             save: jest.fn(),
             create: jest.fn(),
             delete: jest.fn(),
+            remove: jest.fn(),
             createQueryBuilder: jest.fn()
           },
         },
@@ -160,6 +163,15 @@ describe('ChatService', () => {
         (chatRepository.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
         (chatRepository.create as jest.Mock).mockReturnValue(mockChat);
         (chatRepository.save as jest.Mock).mockResolvedValue(mockChat);
+
+        // Service returns participants as IDs
+        const mockChatWithIds = {
+          id: 'chat-1',
+          participants: ['user-1', 'user-2'],
+          messages: [],
+          createdAt: mockChat.createdAt,
+          updatedAt: mockChat.updatedAt
+        };
         (chatRepository.findOne as jest.Mock).mockResolvedValue(mockChat);
 
         const result = await service.createChat(mockUser1.id, mockUser2.id);
@@ -172,7 +184,7 @@ describe('ChatService', () => {
           participants: [mockUser1, mockUser2]
         });
         expect(chatRepository.save).toHaveBeenCalledWith(mockChat);
-        expect(result).toEqual(mockChat);
+        expect(result).toEqual(mockChatWithIds);
       });
     });
   });
@@ -189,6 +201,7 @@ describe('ChatService', () => {
       jest.spyOn(messageRepository, 'findOne').mockResolvedValue(mockMessage as any);
       jest.spyOn(chatRepository, 'findOne').mockResolvedValue(mockChat as any);
       jest.spyOn(messageRepository, 'save').mockResolvedValue(pinnedMessage as any);
+      (messageRepository.count as jest.Mock).mockResolvedValue(0);
 
       const result = await service.pinMessage('message-1', 'user-1');
 
@@ -290,14 +303,18 @@ describe('ChatService', () => {
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([mockMessage]),
-        leftJoinAndSelect: jest.fn().mockReturnThis()
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(1),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis()
       };
 
       (messageRepository.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
 
       const result = await service.searchMessages('chat-1', { query: 'test' });
 
-      expect(result).toHaveLength(1);
+      expect(result.messages).toHaveLength(1);
+      expect(result.total).toBe(1);
       expect(messageRepository.createQueryBuilder).toHaveBeenCalled();
     });
   });
@@ -312,7 +329,12 @@ describe('ChatService', () => {
         createdAt: new Date()
       };
 
-      jest.spyOn(messageRepository, 'findOne').mockResolvedValue(mockMessage as any);
+      jest.spyOn(messageRepository, 'findOne').mockResolvedValue({
+        ...mockMessage,
+        chat: mockChat
+      } as any);
+      jest.spyOn(chatRepository, 'findOne').mockResolvedValue(mockChat as any);
+      jest.spyOn(reactionRepository, 'findOne').mockResolvedValue(null);
       jest.spyOn(reactionRepository, 'create').mockReturnValue(mockReaction as any);
       jest.spyOn(reactionRepository, 'save').mockResolvedValue(mockReaction as any);
 
@@ -323,27 +345,23 @@ describe('ChatService', () => {
     });
 
     it('should get user reaction statistics', async () => {
-      const mockQueryBuilder = {
-        select: jest.fn().mockReturnThis(),
-        addSelect: jest.fn().mockReturnThis(),
-        where: jest.fn().mockReturnThis(),
-        groupBy: jest.fn().mockReturnThis(),
-        getRawMany: jest.fn().mockResolvedValue([
-          { emoji: '👍', count: '2' },
-          { emoji: '❤️', count: '1' }
-        ])
-      };
+      const mockReactions = [
+        { emoji: '👍', messageId: 'msg1', createdAt: new Date() },
+        { emoji: '👍', messageId: 'msg2', createdAt: new Date() },
+        { emoji: '❤️', messageId: 'msg3', createdAt: new Date() }
+      ];
 
-      (reactionRepository.createQueryBuilder as jest.Mock).mockReturnValue(mockQueryBuilder);
+      jest.spyOn(reactionRepository, 'find').mockResolvedValue(mockReactions as any);
 
       const result = await service.getUserReactionStats('user-1');
 
       expect(result).toEqual({
         mostUsedEmojis: [
-          { emoji: '👍', count: '2' },
-          { emoji: '❤️', count: '1' }
+          { emoji: '👍', count: 2 },
+          { emoji: '❤️', count: 1 }
         ],
-        totalReactions: expect.any(Number)
+        totalReactions: 3,
+        recentReactions: mockReactions
       });
     });
   });
