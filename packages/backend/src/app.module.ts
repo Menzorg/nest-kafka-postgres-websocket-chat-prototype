@@ -1,9 +1,11 @@
 import { Module, OnApplicationShutdown } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
 import { UserModule } from './user/user.module';
 import { ChatModule } from './chat/chat.module';
 import { SocketModule } from './socket/socket.module';
+import { HealthModule } from './health/health.module';
 import { User } from './user/entities/user.entity';
 import { Chat } from './chat/entities/chat.entity';
 import { Message } from './chat/entities/message.entity';
@@ -11,6 +13,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { SocketGateway } from './socket/socket.gateway';
 import { KafkaAdapter } from './adapters/kafka/kafka.adapter';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { ShutdownService } from './common/services/shutdown.service';
 
 @Module({
   imports: [
@@ -40,8 +45,18 @@ import { KafkaAdapter } from './adapters/kafka/kafka.adapter';
     UserModule,
     ChatModule,
     SocketModule,
+    HealthModule,
   ],
   providers: [
+    ShutdownService,
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
+    },
     {
       provide: KafkaAdapter,
       useFactory: (configService: ConfigService) => {
