@@ -62,7 +62,7 @@ Frontend URL: http://localhost:3000
 - [x] Unpin messages
 - [x] Display pinned messages section
 - [x] Sync pinned messages across devices
-- [ ] Maximum pinned messages limit (configurable)
+- [x] Maximum pinned messages limit (configurable)
 
 #### 2. Message Forwarding
 - [x] Forward messages to other chats/users
@@ -71,18 +71,18 @@ Frontend URL: http://localhost:3000
 - [x] Forward with additional comment
 
 #### 3. Message Editing & Deletion
-- [ ] Edit sent messages within time limit
-- [ ] Show "edited" indicator
-- [ ] Delete messages for self
-- [ ] Delete messages for everyone
-- [ ] Message edit history
+- [x] Edit sent messages within time limit
+- [x] Show "edited" indicator
+- [x] Delete messages for self
+- [x] Delete messages for everyone
+- [x] Message edit history
 
 #### 4. Message Search
-- [ ] Search messages by content
-- [ ] Search by sender
-- [ ] Search by date range
-- [ ] Jump to message in chat
-- [ ] Highlight search results
+- [x] Search messages by content
+- [x] Search by sender
+- [x] Search by date range
+- [x] Jump to message in chat
+- [x] Highlight search results
 
 ### Medium Priority Features
 

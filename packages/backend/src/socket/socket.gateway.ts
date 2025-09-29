@@ -889,6 +889,143 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     }
   }
 
+  @SubscribeMessage('message:edit')
+  async handleMessageEdit(client: Socket, payload: { messageId: string; content: string }) {
+    try {
+      this.logger.log('=== Handling message:edit ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const editedMessage = await this.chatService.editMessage(payload.messageId, userId, payload.content);
+
+      // Notify all chat participants about the edited message
+      const chatRoom = `chat:${editedMessage.chatId}`;
+      this.io.to(chatRoom).emit('message:edited', editedMessage);
+
+      this.logger.log(`Message ${payload.messageId} edited by user ${userId}`);
+      return { status: 'ok', message: editedMessage };
+    } catch (error) {
+      this.logger.error('Error in handleMessageEdit:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('message:delete')
+  async handleMessageDelete(client: Socket, payload: { messageId: string; forEveryone?: boolean }) {
+    try {
+      this.logger.log('=== Handling message:delete ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const deletedMessage = await this.chatService.deleteMessage(
+        payload.messageId,
+        userId,
+        payload.forEveryone || false
+      );
+
+      // Notify all chat participants about the deleted message
+      const chatRoom = `chat:${deletedMessage.chatId}`;
+
+      if (deletedMessage.isDeletedForEveryone) {
+        // If deleted for everyone, notify all participants
+        this.io.to(chatRoom).emit('message:deleted', {
+          messageId: deletedMessage.id,
+          deletedForEveryone: true
+        });
+      } else {
+        // If deleted only for self, only notify the deleting user
+        client.emit('message:deleted', {
+          messageId: deletedMessage.id,
+          deletedForEveryone: false
+        });
+      }
+
+      this.logger.log(`Message ${payload.messageId} deleted by user ${userId}`);
+      return { status: 'ok', message: deletedMessage };
+    } catch (error) {
+      this.logger.error('Error in handleMessageDelete:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('message:search')
+  async handleMessageSearch(client: Socket, payload: {
+    query?: string;
+    senderId?: string;
+    chatId?: string;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    try {
+      this.logger.log('=== Handling message:search ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const searchResults = await this.chatService.searchMessages(userId, {
+        query: payload.query,
+        senderId: payload.senderId,
+        chatId: payload.chatId,
+        startDate: payload.startDate ? new Date(payload.startDate) : undefined,
+        endDate: payload.endDate ? new Date(payload.endDate) : undefined,
+      });
+
+      this.logger.log(`Found ${searchResults.length} messages matching search criteria`);
+      return { status: 'ok', messages: searchResults };
+    } catch (error) {
+      this.logger.error('Error in handleMessageSearch:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('chat:search-messages')
+  async handleChatMessageSearch(client: Socket, payload: { chatId: string; query: string }) {
+    try {
+      this.logger.log('=== Handling chat:search-messages ===');
+      this.logger.log('Client:', {
+        id: client.id,
+        userId: client.data?.user?.id,
+        connected: client.connected,
+        disconnected: client.disconnected,
+        rooms: Array.from(client.rooms)
+      });
+      this.logger.log('Payload:', payload);
+
+      const userId = client.data.user.id;
+      const searchResults = await this.chatService.searchMessagesByContent(
+        userId,
+        payload.chatId,
+        payload.query
+      );
+
+      this.logger.log(`Found ${searchResults.messages.length} messages matching query in chat ${payload.chatId}`);
+      return { status: 'ok', ...searchResults };
+    } catch (error) {
+      this.logger.error('Error in handleChatMessageSearch:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
   private cleanupDeadConnections() {
     try {
       this.logger.log('=== Running periodic connection cleanup ===');

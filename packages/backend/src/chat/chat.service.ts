@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Like, Between } from 'typeorm';
 import { Chat as ChatEntity } from './entities/chat.entity';
 import { Message as MessageEntity } from './entities/message.entity';
 import { Chat, ChatMessage, MessageDeliveryStatus } from '@webchat/common';
@@ -368,6 +368,19 @@ export class ChatService {
       throw new ConflictException('Message is already pinned');
     }
 
+    // Check maximum pinned messages limit
+    const maxPinnedMessages = parseInt(process.env.MAX_PINNED_MESSAGES || '10', 10);
+    const currentPinnedCount = await this.messageRepository.count({
+      where: {
+        chatId: message.chatId,
+        isPinned: true
+      }
+    });
+
+    if (currentPinnedCount >= maxPinnedMessages) {
+      throw new ConflictException(`Maximum number of pinned messages (${maxPinnedMessages}) reached for this chat`);
+    }
+
     // Update message
     message.isPinned = true;
     message.pinnedAt = new Date();
@@ -596,5 +609,429 @@ export class ChatService {
     });
 
     return forwardedMessages;
+  }
+
+  async editMessage(messageId: string, userId: string, newContent: string): Promise<ChatMessage> {
+    console.log('=== Editing Message ===', { messageId, userId });
+
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    // Check if message is already deleted
+    if (message.isDeleted || message.isDeletedForEveryone) {
+      throw new ConflictException('Cannot edit deleted message');
+    }
+
+    // Only sender can edit their own messages
+    if (message.senderId !== userId) {
+      throw new ConflictException('You can only edit your own messages');
+    }
+
+    // Check time limit for editing (configurable, default 15 minutes)
+    const editTimeLimit = parseInt(process.env.MESSAGE_EDIT_TIME_LIMIT || '900000', 10); // milliseconds
+    const messageAge = Date.now() - message.createdAt.getTime();
+
+    if (messageAge > editTimeLimit) {
+      throw new ConflictException(`Messages can only be edited within ${editTimeLimit / 60000} minutes`);
+    }
+
+    // Store original content if this is the first edit
+    if (!message.isEdited) {
+      message.originalContent = message.content;
+    }
+
+    // Update message
+    message.content = newContent;
+    message.isEdited = true;
+    message.editedAt = new Date();
+
+    const savedMessage = await this.messageRepository.save(message);
+
+    console.log('=== Message Edited ===', {
+      messageId: savedMessage.id,
+      editedAt: savedMessage.editedAt,
+    });
+
+    return {
+      id: savedMessage.id,
+      chatId: savedMessage.chatId,
+      senderId: savedMessage.senderId,
+      content: savedMessage.content,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+      isEdited: savedMessage.isEdited,
+      editedAt: savedMessage.editedAt,
+      originalContent: savedMessage.originalContent,
+    };
+  }
+
+  async deleteMessage(messageId: string, userId: string, deleteForEveryone: boolean = false): Promise<ChatMessage> {
+    console.log('=== Deleting Message ===', { messageId, userId, deleteForEveryone });
+
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+      relations: ['chat', 'chat.participants'],
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    const chat = await this.chatRepository.findOne({
+      where: { id: message.chatId },
+      relations: ['participants'],
+    });
+
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    // Verify user is participant
+    const isParticipant = chat.participants.some(p => p.id === userId);
+    if (!isParticipant) {
+      throw new ConflictException('User is not a participant of this chat');
+    }
+
+    // For delete for everyone, only sender can do it within time limit
+    if (deleteForEveryone) {
+      if (message.senderId !== userId) {
+        throw new ConflictException('Only the sender can delete messages for everyone');
+      }
+
+      // Check time limit for deleting for everyone (configurable, default 60 minutes)
+      const deleteTimeLimit = parseInt(process.env.MESSAGE_DELETE_TIME_LIMIT || '3600000', 10); // milliseconds
+      const messageAge = Date.now() - message.createdAt.getTime();
+
+      if (messageAge > deleteTimeLimit) {
+        throw new ConflictException(`Messages can only be deleted for everyone within ${deleteTimeLimit / 60000} minutes`);
+      }
+
+      message.isDeletedForEveryone = true;
+      message.content = 'This message was deleted'; // Replace content
+    } else {
+      // Delete for self only
+      message.isDeleted = true;
+    }
+
+    message.deletedAt = new Date();
+    message.deletedBy = userId;
+
+    const savedMessage = await this.messageRepository.save(message);
+
+    console.log('=== Message Deleted ===', {
+      messageId: savedMessage.id,
+      deletedBy: savedMessage.deletedBy,
+      deletedAt: savedMessage.deletedAt,
+      isDeletedForEveryone: savedMessage.isDeletedForEveryone,
+    });
+
+    return {
+      id: savedMessage.id,
+      chatId: savedMessage.chatId,
+      senderId: savedMessage.senderId,
+      content: savedMessage.content,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+      isDeleted: savedMessage.isDeleted,
+      isDeletedForEveryone: savedMessage.isDeletedForEveryone,
+      deletedAt: savedMessage.deletedAt,
+      deletedBy: savedMessage.deletedBy,
+    };
+  }
+
+  async getMessageEditHistory(messageId: string, userId: string): Promise<{ originalContent: string | null; currentContent: string; editedAt: Date | null }> {
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+      relations: ['chat', 'chat.participants'],
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    const chat = await this.chatRepository.findOne({
+      where: { id: message.chatId },
+      relations: ['participants'],
+    });
+
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    // Verify user is participant
+    const isParticipant = chat.participants.some(p => p.id === userId);
+    if (!isParticipant) {
+      throw new ConflictException('User is not a participant of this chat');
+    }
+
+    return {
+      originalContent: message.originalContent,
+      currentContent: message.content,
+      editedAt: message.editedAt,
+    };
+  }
+
+  async searchMessages(
+    userId: string,
+    searchParams: {
+      query?: string;
+      senderId?: string;
+      chatId?: string;
+      startDate?: Date;
+      endDate?: Date;
+    }
+  ): Promise<ChatMessage[]> {
+    console.log('=== Searching Messages ===', { userId, searchParams });
+
+    // Build query
+    const queryBuilder = this.messageRepository
+      .createQueryBuilder('message')
+      .leftJoinAndSelect('message.chat', 'chat')
+      .leftJoinAndSelect('chat.participants', 'participant')
+      .where('participant.id = :userId', { userId })
+      .andWhere('(message.isDeleted = false OR message.isDeleted IS NULL)')
+      .andWhere('(message.isDeletedForEveryone = false OR message.isDeletedForEveryone IS NULL)');
+
+    // Add search conditions
+    if (searchParams.query) {
+      queryBuilder.andWhere('message.content ILIKE :query', {
+        query: `%${searchParams.query}%`
+      });
+    }
+
+    if (searchParams.senderId) {
+      queryBuilder.andWhere('message.senderId = :senderId', {
+        senderId: searchParams.senderId
+      });
+    }
+
+    if (searchParams.chatId) {
+      queryBuilder.andWhere('message.chatId = :chatId', {
+        chatId: searchParams.chatId
+      });
+    }
+
+    if (searchParams.startDate && searchParams.endDate) {
+      queryBuilder.andWhere('message.createdAt BETWEEN :startDate AND :endDate', {
+        startDate: searchParams.startDate,
+        endDate: searchParams.endDate,
+      });
+    } else if (searchParams.startDate) {
+      queryBuilder.andWhere('message.createdAt >= :startDate', {
+        startDate: searchParams.startDate,
+      });
+    } else if (searchParams.endDate) {
+      queryBuilder.andWhere('message.createdAt <= :endDate', {
+        endDate: searchParams.endDate,
+      });
+    }
+
+    // Order by relevance and date
+    queryBuilder.orderBy('message.createdAt', 'DESC');
+
+    const messages = await queryBuilder.getMany();
+
+    console.log('=== Search Results Found ===', {
+      count: messages.length,
+      searchParams,
+    });
+
+    return messages.map(message => ({
+      id: message.id,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      content: message.content,
+      status: message.status,
+      createdAt: message.createdAt,
+      isEdited: message.isEdited,
+      editedAt: message.editedAt,
+    }));
+  }
+
+  async searchMessagesByContent(
+    userId: string,
+    chatId: string,
+    searchQuery: string
+  ): Promise<{ messages: ChatMessage[]; highlights: { messageId: string; matches: string[] }[] }> {
+    console.log('=== Searching Messages by Content ===', { userId, chatId, searchQuery });
+
+    // Verify user has access to chat
+    const chat = await this.chatRepository.findOne({
+      where: { id: chatId },
+      relations: ['participants'],
+    });
+
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    const isParticipant = chat.participants.some(p => p.id === userId);
+    if (!isParticipant) {
+      throw new ConflictException('User is not a participant of this chat');
+    }
+
+    // Search messages
+    const messages = await this.messageRepository.find({
+      where: {
+        chatId,
+        content: Like(`%${searchQuery}%`),
+        isDeleted: false,
+        isDeletedForEveryone: false,
+      },
+      order: {
+        createdAt: 'DESC',
+      },
+    });
+
+    // Prepare highlights
+    const highlights = messages.map(message => {
+      const regex = new RegExp(searchQuery, 'gi');
+      const matches = message.content.match(regex) || [];
+
+      return {
+        messageId: message.id,
+        matches: [...new Set(matches)], // Remove duplicates
+      };
+    });
+
+    console.log('=== Search by Content Results ===', {
+      count: messages.length,
+      chatId,
+      query: searchQuery,
+    });
+
+    const result = messages.map(message => ({
+      id: message.id,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      content: message.content,
+      status: message.status,
+      createdAt: message.createdAt,
+      isEdited: message.isEdited,
+      editedAt: message.editedAt,
+    }));
+
+    return {
+      messages: result,
+      highlights,
+    };
+  }
+
+  async searchMessagesBySender(
+    userId: string,
+    chatId: string,
+    senderId: string
+  ): Promise<ChatMessage[]> {
+    console.log('=== Searching Messages by Sender ===', { userId, chatId, senderId });
+
+    // Verify user has access to chat
+    const chat = await this.chatRepository.findOne({
+      where: { id: chatId },
+      relations: ['participants'],
+    });
+
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    const isParticipant = chat.participants.some(p => p.id === userId);
+    if (!isParticipant) {
+      throw new ConflictException('User is not a participant of this chat');
+    }
+
+    // Search messages
+    const messages = await this.messageRepository.find({
+      where: {
+        chatId,
+        senderId,
+        isDeleted: false,
+        isDeletedForEveryone: false,
+      },
+      order: {
+        createdAt: 'DESC',
+      },
+    });
+
+    console.log('=== Search by Sender Results ===', {
+      count: messages.length,
+      chatId,
+      senderId,
+    });
+
+    return messages.map(message => ({
+      id: message.id,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      content: message.content,
+      status: message.status,
+      createdAt: message.createdAt,
+      isEdited: message.isEdited,
+      editedAt: message.editedAt,
+    }));
+  }
+
+  async searchMessagesByDateRange(
+    userId: string,
+    chatId: string,
+    startDate: Date,
+    endDate: Date
+  ): Promise<ChatMessage[]> {
+    console.log('=== Searching Messages by Date Range ===', {
+      userId,
+      chatId,
+      startDate,
+      endDate
+    });
+
+    // Verify user has access to chat
+    const chat = await this.chatRepository.findOne({
+      where: { id: chatId },
+      relations: ['participants'],
+    });
+
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    const isParticipant = chat.participants.some(p => p.id === userId);
+    if (!isParticipant) {
+      throw new ConflictException('User is not a participant of this chat');
+    }
+
+    // Search messages
+    const messages = await this.messageRepository.find({
+      where: {
+        chatId,
+        createdAt: Between(startDate, endDate),
+        isDeleted: false,
+        isDeletedForEveryone: false,
+      },
+      order: {
+        createdAt: 'DESC',
+      },
+    });
+
+    console.log('=== Search by Date Range Results ===', {
+      count: messages.length,
+      chatId,
+      startDate,
+      endDate,
+    });
+
+    return messages.map(message => ({
+      id: message.id,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      content: message.content,
+      status: message.status,
+      createdAt: message.createdAt,
+      isEdited: message.isEdited,
+      editedAt: message.editedAt,
+    }));
   }
 }

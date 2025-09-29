@@ -1,0 +1,99 @@
+
+> @webchat/backend@1.0.0 build
+> nest build --config ./nest-cli.json
+
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m85[0m:[93m7[0m - [91merror[0m[90m TS2552: [0mCannot find name 'userRepository'. Did you mean 'Repository'?
+
+[7m85[0m       userRepository.findOneBy
+[7m  [0m [91m      ~~~~~~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m86[0m:[93m32[0m - [91merror[0m[90m TS2304: [0mCannot find name 'mockUser1'.
+
+[7m86[0m         .mockResolvedValueOnce(mockUser1)
+[7m  [0m [91m                               ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m87[0m:[93m32[0m - [91merror[0m[90m TS2304: [0mCannot find name 'mockUser2'.
+
+[7m87[0m         .mockResolvedValueOnce(mockUser2);
+[7m  [0m [91m                               ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m117[0m:[93m41[0m - [91merror[0m[90m TS2339: [0mProperty 'mockReturnValue' does not exist on type '(alias?: string | undefined, queryRunner?: QueryRunner | undefined) => SelectQueryBuilder<Chat>'.
+
+[7m117[0m       chatRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
+[7m   [0m [91m                                        ~~~~~~~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m118[0m:[93m29[0m - [91merror[0m[90m TS2339: [0mProperty 'mockReturnValue' does not exist on type '{ (): Chat; (entityLikeArray: DeepPartial<Chat>[]): Chat[]; (entityLike: DeepPartial<Chat>): Chat; }'.
+
+[7m118[0m       chatRepository.create.mockReturnValue(mockChat);
+[7m   [0m [91m                            ~~~~~~~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m119[0m:[93m27[0m - [91merror[0m[90m TS2339: [0mProperty 'mockResolvedValue' does not exist on type '{ <T extends DeepPartial<Chat>>(entities: T[], options: SaveOptions & { reload: false; }): Promise<T[]>; <T extends DeepPartial<Chat>>(entities: T[], options?: SaveOptions | undefined): Promise<...>; <T extends DeepPartial<...>>(entity: T, options: SaveOptions & { ...; }): Promise<...>; <T extends DeepPartial<...>>(...'.
+
+[7m119[0m       chatRepository.save.mockResolvedValue(mockChat);
+[7m   [0m [91m                          ~~~~~~~~~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m120[0m:[93m30[0m - [91merror[0m[90m TS2339: [0mProperty 'mockResolvedValue' does not exist on type '(options: FindOneOptions<Chat>) => Promise<Chat | null>'.
+
+[7m120[0m       chatRepository.findOne.mockResolvedValue(mockChat);
+[7m   [0m [91m                             ~~~~~~~~~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m122[0m:[93m13[0m - [91merror[0m[90m TS2451: [0mCannot redeclare block-scoped variable 'result'.
+
+[7m122[0m       const result = await service.createChat(mockUser1.id, mockUser2.id);
+[7m   [0m [91m            ~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m122[0m:[93m47[0m - [91merror[0m[90m TS2304: [0mCannot find name 'mockUser1'.
+
+[7m122[0m       const result = await service.createChat(mockUser1.id, mockUser2.id);
+[7m   [0m [91m                                              ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m122[0m:[93m61[0m - [91merror[0m[90m TS2304: [0mCannot find name 'mockUser2'.
+
+[7m122[0m       const result = await service.createChat(mockUser1.id, mockUser2.id);
+[7m   [0m [91m                                                            ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m124[0m:[93m14[0m - [91merror[0m[90m TS2552: [0mCannot find name 'userRepository'. Did you mean 'Repository'?
+
+[7m124[0m       expect(userRepository.findOneBy).toHaveBeenNthCalledWith(1, { id: mockUser1.id });
+[7m   [0m [91m             ~~~~~~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m124[0m:[93m73[0m - [91merror[0m[90m TS2304: [0mCannot find name 'mockUser1'.
+
+[7m124[0m       expect(userRepository.findOneBy).toHaveBeenNthCalledWith(1, { id: mockUser1.id });
+[7m   [0m [91m                                                                        ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m125[0m:[93m14[0m - [91merror[0m[90m TS2552: [0mCannot find name 'userRepository'. Did you mean 'Repository'?
+
+[7m125[0m       expect(userRepository.findOneBy).toHaveBeenNthCalledWith(2, { id: mockUser2.id });
+[7m   [0m [91m             ~~~~~~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m125[0m:[93m73[0m - [91merror[0m[90m TS2304: [0mCannot find name 'mockUser2'.
+
+[7m125[0m       expect(userRepository.findOneBy).toHaveBeenNthCalledWith(2, { id: mockUser2.id });
+[7m   [0m [91m                                                                        ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m129[0m:[93m24[0m - [91merror[0m[90m TS2304: [0mCannot find name 'mockUser1'.
+
+[7m129[0m         participants: [mockUser1, mockUser2]
+[7m   [0m [91m                       ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m129[0m:[93m35[0m - [91merror[0m[90m TS2304: [0mCannot find name 'mockUser2'.
+
+[7m129[0m         participants: [mockUser1, mockUser2]
+[7m   [0m [91m                                  ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m134[0m:[93m13[0m - [91merror[0m[90m TS2451: [0mCannot redeclare block-scoped variable 'result'.
+
+[7m134[0m       const result = await service.pinMessage('message-1', 'user-1');
+[7m   [0m [91m            ~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m136[0m:[93m21[0m - [91merror[0m[90m TS2339: [0mProperty 'isPinned' does not exist on type 'Chat'.
+
+[7m136[0m       expect(result.isPinned).toBe(true);
+[7m   [0m [91m                    ~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m137[0m:[93m21[0m - [91merror[0m[90m TS2339: [0mProperty 'pinnedBy' does not exist on type 'Chat'.
+
+[7m137[0m       expect(result.pinnedBy).toBe('user-1');
+[7m   [0m [91m                    ~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m164[0m:[93m1[0m - [91merror[0m[90m TS1005: [0m'}' expected.
+
+[7m164[0m 
+[7m   [0m [91m[0m
+
+  [96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m75[0m:[93m37[0m
+    [7m75[0m   describe('Message Pinning', () => {
+    [7m  [0m [96m                                    ~[0m
+    The parser expected to find a '}' to match the '{' token here.
+
+Found 20 error(s).
+
+npm error Lifecycle script `build` failed with error:
+npm error code 1
+npm error path /tmp/gh-issue-solver-1759132209333/packages/backend
+npm error workspace @webchat/backend@1.0.0
+npm error location /tmp/gh-issue-solver-1759132209333/packages/backend
+npm error command failed
+npm error command sh -c nest build --config ./nest-cli.json

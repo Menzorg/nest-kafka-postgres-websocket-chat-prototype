@@ -12,6 +12,7 @@ describe('ChatService - Message Pinning and Forwarding', () => {
   let service: ChatService;
   let messageRepository: Repository<Message>;
   let chatRepository: Repository<Chat>;
+  let module: TestingModule;
 
   const mockMessage = {
     id: 'message-1',
@@ -33,11 +34,13 @@ describe('ChatService - Message Pinning and Forwarding', () => {
     participants: [
       { id: 'user-1' },
       { id: 'user-2' }
-    ]
+    ],
+    createdAt: new Date(),
+    updatedAt: new Date()
   };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         ChatService,
         {
@@ -58,11 +61,14 @@ describe('ChatService - Message Pinning and Forwarding', () => {
             save: jest.fn(),
             find: jest.fn(),
             create: jest.fn(),
+            count: jest.fn(),
           },
         },
         {
           provide: getRepositoryToken(User),
-          useValue: {},
+          useValue: {
+            findOneBy: jest.fn()
+          },
         },
       ],
     }).compile();
@@ -75,14 +81,26 @@ describe('ChatService - Message Pinning and Forwarding', () => {
   describe('Message Pinning', () => {
     it('should pin a message successfully', async () => {
       const pinnedMessage = { ...mockMessage, isPinned: true, pinnedAt: new Date(), pinnedBy: 'user-1' };
-      
+
       jest.spyOn(messageRepository, 'findOne').mockResolvedValue(mockMessage as Message);
       jest.spyOn(chatRepository, 'findOne').mockResolvedValue(mockChat as any);
+      jest.spyOn(messageRepository, 'count').mockResolvedValue(0);
       jest.spyOn(messageRepository, 'save').mockResolvedValue(pinnedMessage as Message);
+
+      const result = await service.pinMessage('message-1', 'user-1');
+
+      expect(result).toHaveProperty('isPinned', true);
+      expect(result).toHaveProperty('pinnedBy', 'user-1');
+    });
+  });
 
   describe('createChat', () => {
     it('should create a new chat between two users', async () => {
-      userRepository.findOneBy
+      const userRepository = module.get<Repository<User>>(getRepositoryToken(User)) as any;
+      const mockUser1 = { id: 'user-1', email: 'user1@test.com', name: 'User 1' } as User;
+      const mockUser2 = { id: 'user-2', email: 'user2@test.com', name: 'User 2' } as User;
+
+      jest.spyOn(userRepository, 'findOneBy')
         .mockResolvedValueOnce(mockUser1)
         .mockResolvedValueOnce(mockUser2);
 
@@ -114,10 +132,10 @@ describe('ChatService - Message Pinning and Forwarding', () => {
         getExists: jest.fn().mockResolvedValue(false)
       } as any;
 
-      chatRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
-      chatRepository.create.mockReturnValue(mockChat);
-      chatRepository.save.mockResolvedValue(mockChat);
-      chatRepository.findOne.mockResolvedValue(mockChat);
+      jest.spyOn(chatRepository, 'createQueryBuilder').mockReturnValue(mockQueryBuilder);
+      jest.spyOn(chatRepository, 'create').mockReturnValue(mockChat as any);
+      jest.spyOn(chatRepository, 'save').mockResolvedValue(mockChat as any);
+      jest.spyOn(chatRepository, 'findOne').mockResolvedValue(mockChat as any);
 
       const result = await service.createChat(mockUser1.id, mockUser2.id);
 
@@ -129,12 +147,13 @@ describe('ChatService - Message Pinning and Forwarding', () => {
         participants: [mockUser1, mockUser2]
       });
       expect(chatRepository.save).toHaveBeenCalledWith(mockChat);
-
-
-      const result = await service.pinMessage('message-1', 'user-1');
-
-      expect(result.isPinned).toBe(true);
-      expect(result.pinnedBy).toBe('user-1');
+      expect(result).toEqual({
+        id: mockChat.id,
+        participants: ['user-1', 'user-2'],
+        messages: [],
+        createdAt: mockChat.createdAt,
+        updatedAt: mockChat.updatedAt
+      });
     });
   });
 

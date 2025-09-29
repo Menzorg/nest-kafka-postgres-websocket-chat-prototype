@@ -43,6 +43,29 @@ export class Message {
   @Column({ type: 'uuid', nullable: true })
   originalSenderId: string | null;
 
+  // Editing fields
+  @Column({ default: false })
+  isEdited: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  editedAt: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  originalContent: string | null;
+
+  // Deletion fields
+  @Column({ default: false })
+  isDeleted: boolean;
+
+  @Column({ default: false })
+  isDeletedForEveryone: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deletedAt: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  deletedBy: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -1,0 +1,26 @@
+
+> @webchat/backend@1.0.0 build
+> nest build --config ./nest-cli.json
+
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m93[0m:[93m37[0m - [91merror[0m[90m TS2339: [0mProperty 'get' does not exist on type 'Module'.
+
+[7m93[0m       const userRepository = module.get<Repository<User>>(getRepositoryToken(User));
+[7m  [0m [91m                                    ~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m148[0m:[93m29[0m - [91merror[0m[90m TS2339: [0mProperty 'createdAt' does not exist on type '{ id: string; participants: { id: string; }[]; }'.
+
+[7m148[0m         createdAt: mockChat.createdAt,
+[7m   [0m [91m                            ~~~~~~~~~[0m
+[96msrc/chat/__tests__/chat.service.spec.ts[0m:[93m149[0m:[93m29[0m - [91merror[0m[90m TS2339: [0mProperty 'updatedAt' does not exist on type '{ id: string; participants: { id: string; }[]; }'.
+
+[7m149[0m         updatedAt: mockChat.updatedAt
+[7m   [0m [91m                            ~~~~~~~~~[0m
+
+Found 3 error(s).
+
+npm error Lifecycle script `build` failed with error:
+npm error code 1
+npm error path /tmp/gh-issue-solver-1759132209333/packages/backend
+npm error workspace @webchat/backend@1.0.0
+npm error location /tmp/gh-issue-solver-1759132209333/packages/backend
+npm error command failed
+npm error command sh -c nest build --config ./nest-cli.json
