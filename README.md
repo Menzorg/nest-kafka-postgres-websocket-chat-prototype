@@ -77,16 +77,7 @@ Frontend URL: http://localhost:3000
 - [ ] Delete messages for everyone
 - [ ] Message edit history
 
-#### 4. File & Media Sharing
-- [ ] Send images (JPEG, PNG, GIF)
-- [ ] Send documents (PDF, DOCX, etc.)
-- [ ] Send videos with preview
-- [ ] Send voice messages
-- [ ] File size limitations
-- [ ] Image compression & thumbnails
-- [ ] Download progress indicators
-
-#### 5. Message Search
+#### 4. Message Search
 - [ ] Search messages by content
 - [ ] Search by sender
 - [ ] Search by date range
@@ -95,43 +86,66 @@ Frontend URL: http://localhost:3000
 
 ### Medium Priority Features
 
-#### 6. Message Reactions/Emojis
+#### 5. Message Reactions/Emojis
 - [ ] React to messages with emojis
 - [ ] Multiple reactions per message
 - [ ] Custom emoji support
 - [ ] Reaction notifications
 - [ ] Most used emojis section
 
-#### 7. Group Chats
+#### 6. Group Chats
 - [ ] Create group chats with multiple users
 - [ ] Add/remove participants
 - [ ] Group admins and permissions
 - [ ] Group info and settings
 - [ ] Leave group functionality
 
-#### 8. Typing Indicators
+#### 7. Typing Indicators
 - [ ] Show when user is typing
 - [ ] Multiple users typing in group
 - [ ] Typing timeout handling
 - [ ] Optimize typing event frequency
 
-#### 9. Message Threading/Replies
+#### 8. Message Threading/Replies
 - [ ] Reply to specific messages
 - [ ] Quote messages
 - [ ] Thread view for conversations
 - [ ] Thread notifications
 - [ ] Jump to original message
 
-#### 10. Message Encryption
+#### 9. Message Encryption
 - [ ] End-to-end encryption
 - [ ] Key exchange protocol
 - [ ] Encrypted file sharing
 - [ ] Backup encryption keys
 - [ ] Security indicators
 
+#### 10. Chat Customization
+- [ ] Custom chat backgrounds
+- [ ] Theme selection (dark/light/custom)
+- [ ] Font size adjustment
+- [ ] Notification sounds
+- [ ] Chat color schemes
+
+#### 11. Advanced Notifications
+- [ ] Push notifications
+- [ ] Email notifications
+- [ ] Notification preferences
+- [ ] Do not disturb mode
+- [ ] Notification grouping
+
 ### Low Priority Features
 
-#### 11. Voice & Video Calls
+#### 12. File & Media Sharing
+- [ ] Send images (JPEG, PNG, GIF)
+- [ ] Send documents (PDF, DOCX, etc.)
+- [ ] Send videos with preview
+- [ ] Send voice messages
+- [ ] File size limitations
+- [ ] Image compression & thumbnails
+- [ ] Download progress indicators
+
+#### 13. Voice & Video Calls
 - [ ] One-on-one voice calls
 - [ ] One-on-one video calls
 - [ ] Group calls
@@ -139,26 +153,12 @@ Frontend URL: http://localhost:3000
 - [ ] Call history
 - [ ] WebRTC integration
 
-#### 12. Message Scheduling
+#### 14. Message Scheduling
 - [ ] Schedule messages for later
 - [ ] Recurring messages
 - [ ] Edit scheduled messages
 - [ ] Cancel scheduled messages
 - [ ] Timezone handling
-
-#### 13. Chat Customization
-- [ ] Custom chat backgrounds
-- [ ] Theme selection (dark/light/custom)
-- [ ] Font size adjustment
-- [ ] Notification sounds
-- [ ] Chat color schemes
-
-#### 14. Advanced Notifications
-- [ ] Push notifications
-- [ ] Email notifications
-- [ ] Notification preferences
-- [ ] Do not disturb mode
-- [ ] Notification grouping
 
 #### 15. Message Translation
 - [ ] Auto-detect language
