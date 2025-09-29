@@ -43,8 +43,13 @@ describe('ChatService - Message Pinning and Forwarding', () => {
         {
           provide: getRepositoryToken(Chat),
           useValue: {
-            findOne: jest.fn(),
-          },
+            findOne: jest.fn().mockResolvedValue(null),
+            findOneBy: jest.fn().mockResolvedValue(null),
+            find: jest.fn().mockResolvedValue([]),
+            create: jest.fn().mockReturnValue(null),
+            save: jest.fn().mockResolvedValue(null),
+            createQueryBuilder: jest.fn()
+          }
         },
         {
           provide: getRepositoryToken(Message),
@@ -74,6 +79,57 @@ describe('ChatService - Message Pinning and Forwarding', () => {
       jest.spyOn(messageRepository, 'findOne').mockResolvedValue(mockMessage as Message);
       jest.spyOn(chatRepository, 'findOne').mockResolvedValue(mockChat as any);
       jest.spyOn(messageRepository, 'save').mockResolvedValue(pinnedMessage as Message);
+
+  describe('createChat', () => {
+    it('should create a new chat between two users', async () => {
+      userRepository.findOneBy
+        .mockResolvedValueOnce(mockUser1)
+        .mockResolvedValueOnce(mockUser2);
+
+      const mockQueryBuilder = {
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        having: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        from: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        rightJoinAndSelect: jest.fn().mockReturnThis(),
+        innerJoin: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        rightJoin: jest.fn().mockReturnThis(),
+        whereInIds: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+        getCount: jest.fn().mockResolvedValue(0),
+        execute: jest.fn().mockResolvedValue([]),
+        getExists: jest.fn().mockResolvedValue(false)
+      } as any;
+
+      chatRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
+      chatRepository.create.mockReturnValue(mockChat);
+      chatRepository.save.mockResolvedValue(mockChat);
+      chatRepository.findOne.mockResolvedValue(mockChat);
+
+      const result = await service.createChat(mockUser1.id, mockUser2.id);
+
+      expect(userRepository.findOneBy).toHaveBeenNthCalledWith(1, { id: mockUser1.id });
+      expect(userRepository.findOneBy).toHaveBeenNthCalledWith(2, { id: mockUser2.id });
+      expect(chatRepository.createQueryBuilder).toHaveBeenCalledWith('chat');
+      expect(chatRepository.create).toHaveBeenCalledWith({
+        id: expect.any(String),
+        participants: [mockUser1, mockUser2]
+      });
+      expect(chatRepository.save).toHaveBeenCalledWith(mockChat);
+
 
       const result = await service.pinMessage('message-1', 'user-1');
 

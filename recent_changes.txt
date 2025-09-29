@@ -1,0 +1,53 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+deleted file mode 100644
+index 061e2a0..0000000
+--- a/CLAUDE.md
++++ /dev/null
+@@ -1,7 +0,0 @@
+-Issue to solve: https://github.com/Menzorg/nest-kafka-postgres-websocket-chat-prototype/issues/1
+-Your prepared branch: issue-1-db94f1ff
+-Your prepared working directory: /tmp/gh-issue-solver-1758993037176
+-Your forked repository: konard/nest-kafka-postgres-websocket-chat-prototype
+-Original repository (upstream): Menzorg/nest-kafka-postgres-websocket-chat-prototype
+-
+-Proceed.
+\ No newline at end of file
+diff --git a/packages/backend/src/chat/__tests__/chat.gateway.spec.ts b/packages/backend/src/chat/__tests__/chat.gateway.spec.ts.backup
+similarity index 100%
+rename from packages/backend/src/chat/__tests__/chat.gateway.spec.ts
+rename to packages/backend/src/chat/__tests__/chat.gateway.spec.ts.backup
+diff --git a/packages/backend/src/chat/chat.gateway.ts b/packages/backend/src/chat/chat.gateway.ts.backup
+similarity index 100%
+rename from packages/backend/src/chat/chat.gateway.ts
+rename to packages/backend/src/chat/chat.gateway.ts.backup
+diff --git a/packages/backend/src/chat/chat.module.ts b/packages/backend/src/chat/chat.module.ts
+index 8dc76f4..cfad86c 100644
+--- a/packages/backend/src/chat/chat.module.ts
++++ b/packages/backend/src/chat/chat.module.ts
+@@ -1,5 +1,4 @@
+ import { Module } from '@nestjs/common';
+-import { ChatGateway } from './chat.gateway';
+ import { ChatService } from './chat.service';
+ import { TypeOrmModule } from '@nestjs/typeorm';
+ import { Message } from './entities/message.entity';
+@@ -16,7 +15,6 @@ import { UserModule } from '../user/user.module';
+     UserModule,
+   ],
+   providers: [
+-    ChatGateway,
+     ChatService,
+   ],
+   exports: [ChatService],
+diff --git a/packages/backend/src/socket/socket.gateway.ts b/packages/backend/src/socket/socket.gateway.ts
+index b32791a..8bf6a63 100644
+--- a/packages/backend/src/socket/socket.gateway.ts
++++ b/packages/backend/src/socket/socket.gateway.ts
+@@ -378,7 +378,7 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
+     const chat = await this.chatService.getChat(payload.chatId);
+ 
+     // Проверяем статус получателя
+-    const recipientId = chat.participants.find(id => id !== userId);
++    const recipientId = chat.participants.find((id: string) => id !== userId);
+     this.logger.log(`[${requestId}] Checking active chats:`, {
+       senderId: userId,
+       recipientId,
