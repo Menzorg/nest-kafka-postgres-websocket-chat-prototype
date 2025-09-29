@@ -62,7 +62,7 @@ Frontend URL: http://localhost:3000
 - [x] Unpin messages
 - [x] Display pinned messages section
 - [x] Sync pinned messages across devices
-- [ ] Maximum pinned messages limit (configurable)
+- [x] Maximum pinned messages limit (configurable)
 
 #### 2. Message Forwarding
 - [x] Forward messages to other chats/users
@@ -71,27 +71,27 @@ Frontend URL: http://localhost:3000
 - [x] Forward with additional comment
 
 #### 3. Message Editing & Deletion
-- [ ] Edit sent messages within time limit
-- [ ] Show "edited" indicator
-- [ ] Delete messages for self
-- [ ] Delete messages for everyone
-- [ ] Message edit history
+- [x] Edit sent messages within time limit
+- [x] Show "edited" indicator
+- [x] Delete messages for self
+- [x] Delete messages for everyone
+- [x] Message edit history
 
 #### 4. Message Search
-- [ ] Search messages by content
-- [ ] Search by sender
-- [ ] Search by date range
-- [ ] Jump to message in chat
-- [ ] Highlight search results
+- [x] Search messages by content
+- [x] Search by sender
+- [x] Search by date range
+- [x] Jump to message in chat
+- [x] Highlight search results
 
 ### Medium Priority Features
 
 #### 5. Message Reactions/Emojis
-- [ ] React to messages with emojis
-- [ ] Multiple reactions per message
-- [ ] Custom emoji support
-- [ ] Reaction notifications
-- [ ] Most used emojis section
+- [x] React to messages with emojis
+- [x] Multiple reactions per message
+- [x] Custom emoji support
+- [x] Reaction notifications
+- [x] Most used emojis section
 
 #### 6. Group Chats
 - [ ] Create group chats with multiple users
@@ -101,10 +101,10 @@ Frontend URL: http://localhost:3000
 - [ ] Leave group functionality
 
 #### 7. Typing Indicators
-- [ ] Show when user is typing
-- [ ] Multiple users typing in group
-- [ ] Typing timeout handling
-- [ ] Optimize typing event frequency
+- [x] Show when user is typing
+- [x] Multiple users typing in group
+- [x] Typing timeout handling
+- [x] Optimize typing event frequency
 
 #### 8. Message Threading/Replies
 - [ ] Reply to specific messages

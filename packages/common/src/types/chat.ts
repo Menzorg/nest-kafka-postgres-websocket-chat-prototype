@@ -26,4 +26,21 @@ export interface ChatMessage {
   isForwarded?: boolean;
   forwardedFromId?: string | null;
   originalSenderId?: string | null;
+
+  // Editing fields
+  isEdited?: boolean;
+  editedAt?: Date | null;
+  editHistory?: Array<{
+    content: string;
+    editedAt: Date;
+    editedBy: string;
+  }>;
+
+  // Deletion fields
+  isDeleted?: boolean;
+  deletedAt?: Date | null;
+  deletedBy?: string | null;
+
+  // Search highlighting
+  highlightedContent?: string;
 }

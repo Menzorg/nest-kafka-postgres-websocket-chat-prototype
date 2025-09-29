@@ -9,6 +9,7 @@ import { HealthModule } from './health/health.module';
 import { User } from './user/entities/user.entity';
 import { Chat } from './chat/entities/chat.entity';
 import { Message } from './chat/entities/message.entity';
+import { Reaction } from './chat/entities/reaction.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { SocketGateway } from './socket/socket.gateway';
@@ -31,7 +32,7 @@ import { ShutdownService } from './common/services/shutdown.service';
         username: configService.get('DB_USERNAME'),
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_DATABASE'),
-        entities: [User, Chat, Message],
+        entities: [User, Chat, Message, Reaction],
         synchronize: true,
         logging: true,
         ssl: false,

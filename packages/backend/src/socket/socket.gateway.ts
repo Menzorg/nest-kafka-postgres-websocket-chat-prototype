@@ -22,6 +22,12 @@ interface ConnectedClient {
   lastActivity: Date;
 }
 
+interface TypingUser {
+  userId: string;
+  userName?: string;
+  timeout?: NodeJS.Timeout;
+}
+
 @WebSocketGateway({
   cors: {
     credentials: true
@@ -32,8 +38,10 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
   @WebSocketServer()
   private readonly io: Server;
   private connectedClients: Map<string, ConnectedClient> = new Map();
+  private typingUsers: Map<string, Map<string, TypingUser>> = new Map(); // chatId -> Map of userId -> TypingUser
   private readonly logger = new Logger(SocketGateway.name);
   private cleanupInterval?: NodeJS.Timeout;
+  private readonly TYPING_TIMEOUT = 3000; // 3 seconds
 
   constructor(
     private jwtService: JwtService,
@@ -276,6 +284,13 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
 
       // Если это было последнее соединение пользователя, оповещаем других
       if (!hasOtherConnections) {
+        // Clean up typing indicators for this user in all chats
+        this.typingUsers.forEach((chatTypingUsers, chatId) => {
+          if (chatTypingUsers.has(clientInfo.userId)) {
+            this.removeTypingUser(chatId, clientInfo.userId);
+          }
+        });
+
         this.broadcastUserStatus(clientInfo.userId, false);
       }
 
@@ -887,6 +902,111 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       this.logger.error('Error in handleMultipleMessageForward:', error);
       return { status: 'error', message: error.message };
     }
+  }
+
+  @SubscribeMessage('typing:start')
+  async handleTypingStart(client: Socket, payload: { chatId: string; userName?: string }) {
+    try {
+      const userId = client.data?.user?.id;
+      if (!userId) {
+        this.logger.error('=== Typing start failed: No user ID ===');
+        return { status: 'error', message: 'Authentication required' };
+      }
+
+      const { chatId, userName } = payload;
+
+      // Initialize typing users map for this chat if not exists
+      if (!this.typingUsers.has(chatId)) {
+        this.typingUsers.set(chatId, new Map());
+      }
+
+      const chatTypingUsers = this.typingUsers.get(chatId)!;
+
+      // Clear existing timeout if user is already typing
+      const existingTyping = chatTypingUsers.get(userId);
+      if (existingTyping?.timeout) {
+        clearTimeout(existingTyping.timeout);
+      }
+
+      // Set new timeout to automatically stop typing after TYPING_TIMEOUT
+      const timeout = setTimeout(() => {
+        this.removeTypingUser(chatId, userId);
+      }, this.TYPING_TIMEOUT);
+
+      // Add user to typing list
+      chatTypingUsers.set(userId, {
+        userId,
+        userName: userName || client.data?.user?.name,
+        timeout
+      });
+
+      // Notify other users in the chat
+      this.broadcastTypingStatus(chatId, userId);
+
+      this.logger.log(`User ${userId} started typing in chat ${chatId}`);
+      return { status: 'ok' };
+    } catch (error) {
+      this.logger.error('Error in handleTypingStart:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  @SubscribeMessage('typing:stop')
+  async handleTypingStop(client: Socket, payload: { chatId: string }) {
+    try {
+      const userId = client.data?.user?.id;
+      if (!userId) {
+        this.logger.error('=== Typing stop failed: No user ID ===');
+        return { status: 'error', message: 'Authentication required' };
+      }
+
+      const { chatId } = payload;
+      this.removeTypingUser(chatId, userId);
+
+      this.logger.log(`User ${userId} stopped typing in chat ${chatId}`);
+      return { status: 'ok' };
+    } catch (error) {
+      this.logger.error('Error in handleTypingStop:', error);
+      return { status: 'error', message: error.message };
+    }
+  }
+
+  private removeTypingUser(chatId: string, userId: string) {
+    const chatTypingUsers = this.typingUsers.get(chatId);
+    if (!chatTypingUsers) return;
+
+    const typingUser = chatTypingUsers.get(userId);
+    if (typingUser) {
+      if (typingUser.timeout) {
+        clearTimeout(typingUser.timeout);
+      }
+      chatTypingUsers.delete(userId);
+
+      // Remove chat from map if no users are typing
+      if (chatTypingUsers.size === 0) {
+        this.typingUsers.delete(chatId);
+      }
+
+      // Notify other users
+      this.broadcastTypingStatus(chatId, userId);
+    }
+  }
+
+  private broadcastTypingStatus(chatId: string, excludeUserId: string) {
+    const chatTypingUsers = this.typingUsers.get(chatId);
+    const typingUsersList = chatTypingUsers
+      ? Array.from(chatTypingUsers.values()).map(u => ({
+          userId: u.userId,
+          userName: u.userName
+        }))
+      : [];
+
+    // Emit to all users in the chat room except the typing user
+    const chatRoom = `chat:${chatId}`;
+    this.io.to(chatRoom).emit('typing:users', {
+      chatId,
+      typingUsers: typingUsersList
+    });
   }
 
   private cleanupDeadConnections() {

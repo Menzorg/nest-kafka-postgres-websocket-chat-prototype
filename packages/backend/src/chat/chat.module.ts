@@ -3,13 +3,14 @@ import { ChatService } from './chat.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Message } from './entities/message.entity';
 import { Chat } from './entities/chat.entity';
+import { Reaction } from './entities/reaction.entity';
 import { AuthModule } from '../auth/auth.module';
 import { KafkaModule } from '../adapters/kafka/kafka.module';
 import { UserModule } from '../user/user.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Message, Chat]),
+    TypeOrmModule.forFeature([Message, Chat, Reaction]),
     AuthModule,
     KafkaModule,
     UserModule,
