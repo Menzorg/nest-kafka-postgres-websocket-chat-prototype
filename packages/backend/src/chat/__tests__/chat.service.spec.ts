@@ -66,6 +66,7 @@ describe('ChatService', () => {
         {
           provide: getRepositoryToken(Chat),
           useValue: {
+            findOne: jest.fn().mockResolvedValue(null),
             findOneBy: jest.fn().mockResolvedValue(null),
             find: jest.fn().mockResolvedValue([]),
             create: jest.fn().mockReturnValue(null),
@@ -135,6 +136,7 @@ describe('ChatService', () => {
       chatRepository.createQueryBuilder.mockReturnValue(mockQueryBuilder);
       chatRepository.create.mockReturnValue(mockChat);
       chatRepository.save.mockResolvedValue(mockChat);
+      chatRepository.findOne.mockResolvedValue(mockChat);
 
       const result = await service.createChat(mockUser1.id, mockUser2.id);
 

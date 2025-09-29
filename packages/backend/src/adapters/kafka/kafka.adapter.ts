@@ -82,25 +82,42 @@ export class KafkaAdapter implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async publish<T>(topic: string, message: T): Promise<void> {
+  async publish<T>(topic: string, message: T, retries = 3): Promise<void> {
     if (this.isShuttingDown) {
       throw new Error('Service is shutting down');
     }
-    try {
-      await this.producer.send({
-        topic,
-        messages: [
-          {
-            key: (message as any).id || (message as any).messageId,
-            value: JSON.stringify(message),
-          },
-        ],
-      });
-      this.logger.debug(`Message published to topic ${topic}`, message);
-    } catch (error) {
-      this.logger.error(`Failed to publish message to topic ${topic}`, error);
-      throw error;
+
+    let lastError: Error = new Error('Failed to publish message');
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        await this.producer.send({
+          topic,
+          messages: [
+            {
+              key: (message as any).id || (message as any).messageId,
+              value: JSON.stringify(message),
+            },
+          ],
+        });
+        this.logger.debug(`Message published to topic ${topic}`, message);
+        return;
+      } catch (error) {
+        lastError = error as Error;
+        this.logger.error(
+          `Failed to publish message to topic ${topic} (attempt ${attempt}/${retries})`,
+          error
+        );
+
+        if (attempt < retries) {
+          // Exponential backoff
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
     }
+
+    throw lastError;
   }
 
   async subscribe<T>(topic: string, handler: (message: T) => Promise<void>): Promise<void> {

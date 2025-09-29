@@ -7,13 +7,14 @@ import {
   OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, UseFilters } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from '../auth/auth.service';
 import { ChatService } from '../chat/chat.service';
 import { ChatMessage, MessageDeliveryStatus } from '@webchat/common';
 import { v4 as uuidv4 } from 'uuid';
 import { ConfigService } from '@nestjs/config';
+import { WsExceptionsFilter } from '../common/filters/ws-exceptions.filter';
 
 interface ConnectedClient {
   socket: Socket;
@@ -26,6 +27,7 @@ interface ConnectedClient {
     credentials: true
   }
 })
+@UseFilters(new WsExceptionsFilter())
 export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   private readonly io: Server;
@@ -434,6 +436,10 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     // Отправляем сообщение в комнату чата
     this.io.to(roomName).emit('message', message);
     this.logger.log(`[${requestId}] Message broadcasted to chat room: ${roomName}`);
+
+    // Отправляем подтверждение отправителю
+    client.emit('message:ack', { messageId: message.id });
+    this.logger.log(`[${requestId}] Acknowledgment sent to sender`);
 
     this.logger.log(`=== Finished message handling (Request ID: ${requestId}) ===`);
     return message;
