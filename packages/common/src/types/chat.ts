@@ -16,4 +16,14 @@ export interface ChatMessage {
   content: string;
   status: MessageDeliveryStatus;
   createdAt: Date;
+
+  // Pinning fields
+  isPinned?: boolean;
+  pinnedAt?: Date | null;
+  pinnedBy?: string | null;
+
+  // Forwarding fields
+  isForwarded?: boolean;
+  forwardedFromId?: string | null;
+  originalSenderId?: string | null;
 }

@@ -304,7 +304,7 @@ export class ChatService {
 
   async getUndeliveredMessages(userId: string, chatId?: string): Promise<ChatMessage[]> {
     console.log('=== Getting Undelivered Messages ===', { userId, chatId });
-    
+
     const queryBuilder = this.messageRepository
       .createQueryBuilder('message')
       .leftJoinAndSelect('message.chat', 'chat')
@@ -334,5 +334,267 @@ export class ChatService {
       status: message.status,
       createdAt: message.createdAt,
     }));
+  }
+
+  async pinMessage(messageId: string, userId: string): Promise<ChatMessage> {
+    console.log('=== Pinning Message ===', { messageId, userId });
+
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+      relations: ['chat', 'chat.participants'],
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    const chat = await this.chatRepository.findOne({
+      where: { id: message.chatId },
+      relations: ['participants'],
+    });
+
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    // Verify user is participant
+    const isParticipant = chat.participants.some(p => p.id === userId);
+    if (!isParticipant) {
+      throw new ConflictException('User is not a participant of this chat');
+    }
+
+    // Check if already pinned
+    if (message.isPinned) {
+      throw new ConflictException('Message is already pinned');
+    }
+
+    // Update message
+    message.isPinned = true;
+    message.pinnedAt = new Date();
+    message.pinnedBy = userId;
+
+    const savedMessage = await this.messageRepository.save(message);
+
+    console.log('=== Message Pinned ===', {
+      messageId: savedMessage.id,
+      pinnedBy: savedMessage.pinnedBy,
+      pinnedAt: savedMessage.pinnedAt,
+    });
+
+    return {
+      id: savedMessage.id,
+      chatId: savedMessage.chatId,
+      senderId: savedMessage.senderId,
+      content: savedMessage.content,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+      isPinned: savedMessage.isPinned,
+      pinnedAt: savedMessage.pinnedAt,
+      pinnedBy: savedMessage.pinnedBy,
+    };
+  }
+
+  async unpinMessage(messageId: string, userId: string): Promise<ChatMessage> {
+    console.log('=== Unpinning Message ===', { messageId, userId });
+
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+      relations: ['chat', 'chat.participants'],
+    });
+
+    if (!message) {
+      throw new NotFoundException('Message not found');
+    }
+
+    const chat = await this.chatRepository.findOne({
+      where: { id: message.chatId },
+      relations: ['participants'],
+    });
+
+    if (!chat) {
+      throw new NotFoundException('Chat not found');
+    }
+
+    // Verify user is participant
+    const isParticipant = chat.participants.some(p => p.id === userId);
+    if (!isParticipant) {
+      throw new ConflictException('User is not a participant of this chat');
+    }
+
+    // Check if not pinned
+    if (!message.isPinned) {
+      throw new ConflictException('Message is not pinned');
+    }
+
+    // Update message
+    message.isPinned = false;
+    message.pinnedAt = null;
+    message.pinnedBy = null;
+
+    const savedMessage = await this.messageRepository.save(message);
+
+    console.log('=== Message Unpinned ===', {
+      messageId: savedMessage.id,
+    });
+
+    return {
+      id: savedMessage.id,
+      chatId: savedMessage.chatId,
+      senderId: savedMessage.senderId,
+      content: savedMessage.content,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+      isPinned: savedMessage.isPinned,
+      pinnedAt: savedMessage.pinnedAt,
+      pinnedBy: savedMessage.pinnedBy,
+    };
+  }
+
+  async getPinnedMessages(chatId: string): Promise<ChatMessage[]> {
+    const messages = await this.messageRepository.find({
+      where: {
+        chatId,
+        isPinned: true
+      },
+      order: {
+        pinnedAt: 'DESC'
+      },
+    });
+
+    return messages.map(message => ({
+      id: message.id,
+      chatId: message.chatId,
+      senderId: message.senderId,
+      content: message.content,
+      status: message.status,
+      createdAt: message.createdAt,
+      isPinned: message.isPinned,
+      pinnedAt: message.pinnedAt,
+      pinnedBy: message.pinnedBy,
+    }));
+  }
+
+  async forwardMessage(
+    messageId: string,
+    toChatId: string,
+    userId: string,
+    additionalContent?: string
+  ): Promise<ChatMessage> {
+    console.log('=== Forwarding Message ===', {
+      messageId,
+      toChatId,
+      userId,
+      hasAdditionalContent: !!additionalContent,
+    });
+
+    // Get original message
+    const originalMessage = await this.messageRepository.findOne({
+      where: { id: messageId },
+      relations: ['chat', 'chat.participants'],
+    });
+
+    if (!originalMessage) {
+      throw new NotFoundException('Original message not found');
+    }
+
+    // Verify user has access to original message
+    const originalChat = await this.chatRepository.findOne({
+      where: { id: originalMessage.chatId },
+      relations: ['participants'],
+    });
+
+    if (!originalChat) {
+      throw new NotFoundException('Original chat not found');
+    }
+
+    const hasAccessToOriginal = originalChat.participants.some(p => p.id === userId);
+    if (!hasAccessToOriginal) {
+      throw new ConflictException('User does not have access to original message');
+    }
+
+    // Verify user has access to target chat
+    const targetChat = await this.chatRepository.findOne({
+      where: { id: toChatId },
+      relations: ['participants'],
+    });
+
+    if (!targetChat) {
+      throw new NotFoundException('Target chat not found');
+    }
+
+    const hasAccessToTarget = targetChat.participants.some(p => p.id === userId);
+    if (!hasAccessToTarget) {
+      throw new ConflictException('User is not a participant of target chat');
+    }
+
+    // Create forwarded message content
+    let forwardedContent = originalMessage.content;
+    if (additionalContent) {
+      forwardedContent = `${additionalContent}\n\n--- Forwarded message ---\n${originalMessage.content}`;
+    }
+
+    // Create new message as forwarded
+    const forwardedMessage = this.messageRepository.create({
+      id: uuidv4(),
+      chatId: toChatId,
+      senderId: userId,
+      content: forwardedContent,
+      status: MessageDeliveryStatus.SENT,
+      isForwarded: true,
+      forwardedFromId: originalMessage.id,
+      originalSenderId: originalMessage.senderId,
+      createdAt: new Date(),
+    });
+
+    const savedMessage = await this.messageRepository.save(forwardedMessage);
+
+    console.log('=== Message Forwarded ===', {
+      newMessageId: savedMessage.id,
+      originalMessageId: messageId,
+      toChatId,
+      forwardedBy: userId,
+    });
+
+    return {
+      id: savedMessage.id,
+      chatId: savedMessage.chatId,
+      senderId: savedMessage.senderId,
+      content: savedMessage.content,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+      isForwarded: savedMessage.isForwarded,
+      forwardedFromId: savedMessage.forwardedFromId,
+      originalSenderId: savedMessage.originalSenderId,
+    };
+  }
+
+  async forwardMultipleMessages(
+    messageIds: string[],
+    toChatId: string,
+    userId: string
+  ): Promise<ChatMessage[]> {
+    console.log('=== Forwarding Multiple Messages ===', {
+      messageCount: messageIds.length,
+      toChatId,
+      userId,
+    });
+
+    const forwardedMessages: ChatMessage[] = [];
+
+    for (const messageId of messageIds) {
+      try {
+        const forwarded = await this.forwardMessage(messageId, toChatId, userId);
+        forwardedMessages.push(forwarded);
+      } catch (error) {
+        console.error(`Failed to forward message ${messageId}:`, error);
+      }
+    }
+
+    console.log('=== Multiple Messages Forwarded ===', {
+      requestedCount: messageIds.length,
+      forwardedCount: forwardedMessages.length,
+    });
+
+    return forwardedMessages;
   }
 }
