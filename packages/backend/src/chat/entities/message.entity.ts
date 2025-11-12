@@ -46,6 +46,29 @@ export class Message {
   @CreateDateColumn()
   createdAt: Date;
 
+  // Edit fields
+  @Column({ default: false })
+  isEdited: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  editedAt: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  originalContent: string | null;
+
+  // Delete fields
+  @Column({ default: false })
+  isDeleted: boolean;
+
+  @Column({ default: false })
+  isDeletedForEveryone: boolean;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deletedAt: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  deletedBy: string | null;
+
   @ManyToOne(() => Chat, chat => chat.messages)
   @JoinColumn({ name: 'chatId' })
   chat: Chat;
